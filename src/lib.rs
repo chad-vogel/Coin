@@ -44,6 +44,16 @@ impl Blockchain {
     pub fn len(&self) -> usize {
         self.chain.len()
     }
+
+    pub fn replace(&mut self, new_chain: Vec<Transaction>) {
+        if new_chain.len() > self.chain.len() {
+            self.chain = new_chain;
+        }
+    }
+
+    pub fn all(&self) -> Vec<Transaction> {
+        self.chain.clone()
+    }
 }
 
 #[cfg(test)]

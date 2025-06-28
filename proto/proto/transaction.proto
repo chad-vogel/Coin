@@ -17,6 +17,12 @@ message Peers {
   repeated string addrs = 1;
 }
 
+message GetChain {}
+
+message Chain {
+  repeated Transaction blocks = 1;
+}
+
 message NodeMessage {
   oneof msg {
     Transaction transaction = 1;
@@ -24,5 +30,7 @@ message NodeMessage {
     Pong pong = 3;
     GetPeers get_peers = 4;
     Peers peers = 5;
+    GetChain get_chain = 6;
+    Chain chain = 7;
   }
 }

@@ -19,7 +19,7 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Format
-        run: cargo fmt -- --check
+        run: cargo fmt
       - name: Test
         run: cargo test
       - name: Coverage

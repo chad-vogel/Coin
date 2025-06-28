@@ -7,3 +7,4 @@ edition = "2024"
 coin-proto = { path = "../proto" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 prost = "0.12"
+coin = { path = ".." }
