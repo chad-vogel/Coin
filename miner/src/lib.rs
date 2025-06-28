@@ -1,4 +1,4 @@
-use coin::{Block, Blockchain, TransactionExt};
+use coin::{Block, Blockchain, TransactionExt, coinbase_transaction};
 use sha2::{Digest, Sha256};
 
 fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
@@ -10,9 +10,17 @@ fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
     true
 }
 
-pub fn mine_block(chain: &mut Blockchain) -> Block {
+pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     let difficulty = chain.difficulty();
     let mut block = chain.candidate_block();
+    block
+        .transactions
+        .insert(0, coinbase_transaction(miner.to_string()));
+    let mut h = Sha256::new();
+    for tx in &block.transactions {
+        h.update(tx.hash());
+    }
+    block.header.merkle_root = hex::encode(h.finalize());
     block.header.difficulty = difficulty;
     loop {
         let hash = {
@@ -53,9 +61,19 @@ mod tests {
         bc.add_transaction(new_transaction("a".into(), "b".into(), 1));
         let len_before = bc.len();
         let difficulty = bc.difficulty();
-        let block = mine_block(&mut bc);
+        let block = mine_block(&mut bc, "miner");
         assert!(bc.len() > len_before);
         let hash = hex::decode(block.hash()).unwrap();
         assert!(meets_difficulty(&hash, difficulty));
+    }
+
+    #[test]
+    fn mining_rewards_miner() {
+        let mut bc = Blockchain::new();
+        assert_eq!(bc.balance("miner"), 0);
+        mine_block(&mut bc, "miner");
+        assert_eq!(bc.balance("miner"), coin::BLOCK_SUBSIDY as i64);
+        mine_block(&mut bc, "miner");
+        assert_eq!(bc.balance("miner"), (coin::BLOCK_SUBSIDY * 2) as i64);
     }
 }
