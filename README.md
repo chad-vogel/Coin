@@ -7,7 +7,6 @@ This project aims to become a full-fledged coin system built with multiple crate
 ```bash
 # Format and test
 cargo fmt
-cargo fmt -- --check
 cargo test
 
 # Optional: run coverage
