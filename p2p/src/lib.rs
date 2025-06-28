@@ -1,5 +1,5 @@
-use coin_proto::proto::{GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Chain, Transaction};
 use coin::Blockchain;
+use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
 use prost::Message;
 use std::collections::HashSet;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -71,6 +71,10 @@ impl Node {
             node_type,
             chain: Arc::new(Mutex::new(Blockchain::new())),
         }
+    }
+
+    pub fn node_type(&self) -> NodeType {
+        self.node_type
     }
 
     /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
@@ -212,7 +216,10 @@ impl Node {
     }
 
     /// Request blockchain data from a peer and replace local chain if theirs is longer
-    pub async fn sync_from_peer<A: tokio::net::ToSocketAddrs>(&self, addr: A) -> tokio::io::Result<()> {
+    pub async fn sync_from_peer<A: tokio::net::ToSocketAddrs>(
+        &self,
+        addr: A,
+    ) -> tokio::io::Result<()> {
         let mut stream = TcpStream::connect(addr).await?;
         let get = NodeMessage {
             msg: Some(coin_proto::proto::node_message::Msg::GetChain(GetChain {})),
@@ -255,6 +262,7 @@ mod tests {
     #[tokio::test]
     async fn node_connects_and_pings() {
         let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet);
+        assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
         let addr = addrs[0];
         node.connect(addr).await.unwrap();

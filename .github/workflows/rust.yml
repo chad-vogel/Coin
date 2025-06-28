@@ -19,6 +19,8 @@ jobs:
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Format
+        run: cargo fmt
+      - name: Format Check
         run: cargo fmt -- --check
       - name: Test
         run: cargo test
