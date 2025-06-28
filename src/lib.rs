@@ -1,22 +1,20 @@
+pub use coin_proto::proto::Transaction;
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Transaction {
-    pub sender: String,
-    pub recipient: String,
-    pub amount: u64,
+pub fn new_transaction(sender: String, recipient: String, amount: u64) -> Transaction {
+    Transaction {
+        sender,
+        recipient,
+        amount,
+    }
 }
 
-impl Transaction {
-    pub fn new(sender: String, recipient: String, amount: u64) -> Self {
-        Self {
-            sender,
-            recipient,
-            amount,
-        }
-    }
+pub trait TransactionExt {
+    fn hash(&self) -> String;
+}
 
-    pub fn hash(&self) -> String {
+impl TransactionExt for Transaction {
+    fn hash(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
@@ -54,7 +52,7 @@ mod tests {
 
     #[test]
     fn transaction_hash_consistent() {
-        let tx = Transaction::new("alice".into(), "bob".into(), 10);
+        let tx = new_transaction("alice".into(), "bob".into(), 10);
         let hash1 = tx.hash();
         let hash2 = tx.hash();
         assert_eq!(hash1, hash2);
@@ -64,7 +62,7 @@ mod tests {
     fn blockchain_adds_transactions() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.len(), 0);
-        let tx = Transaction::new("alice".into(), "bob".into(), 5);
+        let tx = new_transaction("alice".into(), "bob".into(), 5);
         bc.add_transaction(tx.clone());
         assert_eq!(bc.len(), 1);
         assert!(bc.last_hash().is_some());
