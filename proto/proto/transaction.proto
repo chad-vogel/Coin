@@ -6,3 +6,23 @@ message Transaction {
   string recipient = 2;
   uint64 amount = 3;
 }
+
+message Ping {}
+
+message Pong {}
+
+message GetPeers {}
+
+message Peers {
+  repeated string addrs = 1;
+}
+
+message NodeMessage {
+  oneof msg {
+    Transaction transaction = 1;
+    Ping ping = 2;
+    Pong pong = 3;
+    GetPeers get_peers = 4;
+    Peers peers = 5;
+  }
+}
