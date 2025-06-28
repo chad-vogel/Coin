@@ -1,4 +1,5 @@
-use coin_proto::proto::{GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
+use coin_proto::proto::{GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Chain, Transaction};
+use coin::Blockchain;
 use prost::Message;
 use std::collections::HashSet;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -34,28 +35,41 @@ async fn read_with_timeout(socket: &mut TcpStream) -> bool {
         .is_ok()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NodeType {
+    Wallet,
+    Miner,
+    Verifier,
+}
+
 /// Simple P2P node maintaining a peer address list and pinging peers
 pub struct Node {
     port: u16,
     peers: Arc<Mutex<HashSet<SocketAddr>>>,
     ping_interval: Duration,
+    node_type: NodeType,
+    chain: Arc<Mutex<Blockchain>>,
 }
 
 impl Node {
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, node_type: NodeType) -> Self {
         Self {
             port,
             peers: Arc::new(Mutex::new(HashSet::new())),
             ping_interval: Duration::from_secs(5),
+            node_type,
+            chain: Arc::new(Mutex::new(Blockchain::new())),
         }
     }
 
     #[allow(dead_code)]
-    pub fn with_interval(port: u16, interval: Duration) -> Self {
+    pub fn with_interval(port: u16, interval: Duration, node_type: NodeType) -> Self {
         Self {
             port,
             peers: Arc::new(Mutex::new(HashSet::new())),
             ping_interval: interval,
+            node_type,
+            chain: Arc::new(Mutex::new(Blockchain::new())),
         }
     }
 
@@ -68,22 +82,29 @@ impl Node {
         let local_addrs = vec![listener_v4.local_addr()?, listener_v6.local_addr()?];
         let (tx, rx) = mpsc::channel(8);
         let peers = self.peers.clone();
+        let chain = self.chain.clone();
 
         // accept loop for each listener
         for listener in [listener_v4, listener_v6] {
             let tx = tx.clone();
             let peers = peers.clone();
+            let chain = chain.clone();
             tokio::spawn(async move {
                 loop {
                     if let Ok((mut socket, addr)) = listener.accept().await {
                         peers.lock().await.insert(addr);
                         let tx = tx.clone();
                         let peers = peers.clone();
+                        let chain = chain.clone();
                         tokio::spawn(async move {
                             loop {
                                 match read_msg(&mut socket).await {
                                     Ok(msg) => match msg.msg.unwrap() {
                                         coin_proto::proto::node_message::Msg::Transaction(t) => {
+                                            {
+                                                let mut chain = chain.lock().await;
+                                                chain.add_transaction(t.clone());
+                                            }
                                             let _ = tx.send(t).await;
                                         }
                                         coin_proto::proto::node_message::Msg::Ping(_) => {
@@ -121,6 +142,20 @@ impl Node {
                                                     }
                                                 }
                                             }
+                                        }
+                                        coin_proto::proto::node_message::Msg::GetChain(_) => {
+                                            let blocks = chain.lock().await.all();
+                                            let msg = NodeMessage {
+                                                msg: Some(
+                                                    coin_proto::proto::node_message::Msg::Chain(
+                                                        Chain { blocks },
+                                                    ),
+                                                ),
+                                            };
+                                            let _ = write_msg(&mut socket, &msg).await;
+                                        }
+                                        coin_proto::proto::node_message::Msg::Chain(c) => {
+                                            chain.lock().await.replace(c.blocks);
                                         }
                                     },
                                     Err(_) => break,
@@ -176,8 +211,27 @@ impl Node {
         Ok(())
     }
 
+    /// Request blockchain data from a peer and replace local chain if theirs is longer
+    pub async fn sync_from_peer<A: tokio::net::ToSocketAddrs>(&self, addr: A) -> tokio::io::Result<()> {
+        let mut stream = TcpStream::connect(addr).await?;
+        let get = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::GetChain(GetChain {})),
+        };
+        write_msg(&mut stream, &get).await?;
+        if let Ok(resp) = read_msg(&mut stream).await {
+            if let Some(coin_proto::proto::node_message::Msg::Chain(c)) = resp.msg {
+                self.chain.lock().await.replace(c.blocks);
+            }
+        }
+        Ok(())
+    }
+
     pub async fn peers(&self) -> Vec<SocketAddr> {
         self.peers.lock().await.iter().copied().collect()
+    }
+
+    pub async fn chain_len(&self) -> usize {
+        self.chain.lock().await.len()
     }
 }
 
@@ -200,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn node_connects_and_pings() {
-        let node = Node::with_interval(0, Duration::from_millis(50));
+        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
         let addr = addrs[0];
         node.connect(addr).await.unwrap();
@@ -221,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn peers_message_updates_list() {
-        let node = Node::new(0);
+        let node = Node::new(0, NodeType::Wallet);
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -238,11 +292,52 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_peer_gets_dropped() {
-        let node = Node::with_interval(0, Duration::from_millis(50));
+        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet);
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
         node.peers.lock().await.insert(unreachable);
         sleep(Duration::from_millis(200)).await;
         assert!(!node.peers().await.contains(&unreachable));
+    }
+
+    #[tokio::test]
+    async fn sync_from_peer_updates_chain() {
+        let node_a = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
+        let (addrs_a, _) = node_a.start().await.unwrap();
+        let addr_a = addrs_a[0];
+        node_a.chain.lock().await.add_transaction(Transaction {
+            sender: "x".into(),
+            recipient: "y".into(),
+            amount: 2,
+        });
+
+        let node_b = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
+        let (addrs_b, _) = node_b.start().await.unwrap();
+        let addr_b = addrs_b[0];
+        node_b.connect(addr_a).await.unwrap();
+        node_b.sync_from_peer(addr_a).await.unwrap();
+        assert_eq!(node_b.chain_len().await, 1);
+        node_a.peers.lock().await.remove(&addr_b);
+        node_b.peers.lock().await.remove(&addr_a);
+    }
+
+    #[tokio::test]
+    async fn chain_message_updates_chain() {
+        let node = Node::new(0, NodeType::Wallet);
+        let (addrs, _rx) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let chain_msg = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::Chain(Chain {
+                blocks: vec![Transaction {
+                    sender: "s".into(),
+                    recipient: "r".into(),
+                    amount: 3,
+                }],
+            })),
+        };
+        write_msg(&mut stream, &chain_msg).await.unwrap();
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(node.chain_len().await, 1);
     }
 }

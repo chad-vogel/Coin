@@ -87,6 +87,7 @@ dependencies = [
 name = "coin-p2p"
 version = "0.1.0"
 dependencies = [
+ "coin",
  "coin-proto",
  "prost",
  "tokio",
