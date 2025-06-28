@@ -1,6 +1,8 @@
 use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
+use hex;
 use prost::Message;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
@@ -40,6 +42,37 @@ pub enum NodeType {
     Wallet,
     Miner,
     Verifier,
+}
+
+fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
+    for i in 0..difficulty {
+        if hash.get(i as usize).copied().unwrap_or(0) != 0 {
+            return false;
+        }
+    }
+    true
+}
+
+fn valid_block(chain: &Blockchain, block: &Block) -> bool {
+    if block.header.previous_hash != chain.last_block_hash().unwrap_or_default() {
+        return false;
+    }
+    let mut hasher = Sha256::new();
+    for tx in &block.transactions {
+        if tx.sender.is_empty() || tx.recipient.is_empty() {
+            return false;
+        }
+        hasher.update(tx.hash());
+    }
+    let merkle = hex::encode(hasher.finalize());
+    if merkle != block.header.merkle_root {
+        return false;
+    }
+    if let Ok(hash) = hex::decode(block.hash()) {
+        meets_difficulty(&hash, block.header.difficulty)
+    } else {
+        false
+    }
 }
 
 /// Simple P2P node maintaining a peer address list and pinging peers
@@ -179,8 +212,23 @@ impl Node {
                                                 .collect();
                                             chain.lock().await.replace(blocks);
                                         }
-                                        coin_proto::proto::node_message::Msg::Block(_b) => {
-                                            // block handling not implemented yet
+                                        coin_proto::proto::node_message::Msg::Block(b) => {
+                                            if let Some(h) = b.header {
+                                                let block = Block {
+                                                    header: BlockHeader {
+                                                        previous_hash: h.previous_hash,
+                                                        merkle_root: h.merkle_root,
+                                                        timestamp: h.timestamp,
+                                                        nonce: h.nonce,
+                                                        difficulty: h.difficulty,
+                                                    },
+                                                    transactions: b.transactions,
+                                                };
+                                                let mut chain = chain.lock().await;
+                                                if valid_block(&chain, &block) {
+                                                    chain.add_block(block);
+                                                }
+                                            }
                                         }
                                     },
                                     Err(_) => break,
@@ -263,6 +311,37 @@ impl Node {
                     })
                     .collect();
                 self.chain.lock().await.replace(blocks);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_block(&self, block: &Block) -> tokio::io::Result<()> {
+        let peers: Vec<SocketAddr> = self.peers().await;
+        let msg = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::Block(
+                coin_proto::proto::Block {
+                    header: Some(coin_proto::proto::BlockHeader {
+                        previous_hash: block.header.previous_hash.clone(),
+                        merkle_root: block.header.merkle_root.clone(),
+                        timestamp: block.header.timestamp,
+                        nonce: block.header.nonce,
+                        difficulty: block.header.difficulty,
+                    }),
+                    transactions: block.transactions.clone(),
+                },
+            )),
+        };
+        for addr in peers {
+            match TcpStream::connect(addr).await {
+                Ok(mut stream) => {
+                    if write_msg(&mut stream, &msg).await.is_err() {
+                        self.peers.lock().await.remove(&addr);
+                    }
+                }
+                Err(_) => {
+                    self.peers.lock().await.remove(&addr);
+                }
             }
         }
         Ok(())
@@ -387,5 +466,78 @@ mod tests {
         write_msg(&mut stream, &chain_msg).await.unwrap();
         sleep(Duration::from_millis(50)).await;
         assert_eq!(node.chain_len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn block_message_updates_chain() {
+        let node = Node::new(0, NodeType::Verifier);
+        let (addrs, _rx) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 1,
+        };
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let merkle = hex::encode(h.finalize());
+        let block_msg = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::Block(
+                coin_proto::proto::Block {
+                    header: Some(coin_proto::proto::BlockHeader {
+                        previous_hash: String::new(),
+                        merkle_root: merkle,
+                        timestamp: 0,
+                        nonce: 0,
+                        difficulty: 0,
+                    }),
+                    transactions: vec![tx],
+                },
+            )),
+        };
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        write_msg(&mut stream, &block_msg).await.unwrap();
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(node.chain_len().await, 1);
+    }
+
+    #[tokio::test]
+    async fn broadcast_block_propagates() {
+        let node_a = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
+        let (addrs_a, _) = node_a.start().await.unwrap();
+        let addr_a = addrs_a[0];
+
+        let node_b = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
+        let (addrs_b, _) = node_b.start().await.unwrap();
+        let addr_b = addrs_b[0];
+
+        node_a.peers.lock().await.insert(addr_b);
+
+        let tx = Transaction {
+            sender: "x".into(),
+            recipient: "y".into(),
+            amount: 2,
+        };
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let merkle = hex::encode(h.finalize());
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: merkle,
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        };
+        node_a.chain.lock().await.add_block(block.clone());
+        node_a.broadcast_block(&block).await.unwrap();
+
+        sleep(Duration::from_millis(100)).await;
+        assert_eq!(node_b.chain_len().await, 1);
+
+        node_a.peers.lock().await.remove(&addr_b);
+        node_b.peers.lock().await.remove(&addr_a);
     }
 }

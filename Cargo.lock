@@ -89,7 +89,9 @@ version = "0.1.0"
 dependencies = [
  "coin",
  "coin-proto",
+ "hex",
  "prost",
+ "sha2",
  "tokio",
 ]
 
