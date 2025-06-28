@@ -10,7 +10,8 @@ fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
     true
 }
 
-pub fn mine_block(chain: &mut Blockchain, difficulty: u32) -> Block {
+pub fn mine_block(chain: &mut Blockchain) -> Block {
+    let difficulty = chain.difficulty();
     let mut block = chain.candidate_block();
     block.header.difficulty = difficulty;
     loop {
@@ -51,9 +52,10 @@ mod tests {
         let mut bc = Blockchain::new();
         bc.add_transaction(new_transaction("a".into(), "b".into(), 1));
         let len_before = bc.len();
-        let block = mine_block(&mut bc, 1);
+        let difficulty = bc.difficulty();
+        let block = mine_block(&mut bc);
         assert!(bc.len() > len_before);
         let hash = hex::decode(block.hash()).unwrap();
-        assert!(meets_difficulty(&hash, 1));
+        assert!(meets_difficulty(&hash, difficulty));
     }
 }

@@ -2,6 +2,11 @@ pub use coin_proto::proto::Transaction;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Number of blocks used for difficulty adjustment
+pub const DIFFICULTY_WINDOW: usize = 3;
+/// Target time between blocks in seconds
+pub const TARGET_BLOCK_TIME: u64 = 1;
+
 pub fn new_transaction(sender: String, recipient: String, amount: u64) -> Transaction {
     Transaction {
         sender,
@@ -59,6 +64,7 @@ impl Block {
 pub struct Blockchain {
     chain: Vec<Block>,
     mempool: Vec<Transaction>,
+    difficulty: u32,
 }
 
 impl Blockchain {
@@ -66,6 +72,7 @@ impl Blockchain {
         Self {
             chain: Vec::new(),
             mempool: Vec::new(),
+            difficulty: 1,
         }
     }
 
@@ -91,7 +98,7 @@ impl Blockchain {
                     .unwrap()
                     .as_secs(),
                 nonce: 0,
-                difficulty: 0,
+                difficulty: self.difficulty,
             },
             transactions: self.mempool.clone(),
         }
@@ -105,6 +112,24 @@ impl Blockchain {
             }
         }
         self.chain.push(block);
+
+        if self.chain.len() >= DIFFICULTY_WINDOW {
+            let window = &self.chain[self.chain.len() - DIFFICULTY_WINDOW..];
+            let mut total = 0u64;
+            let mut count = 0u64;
+            for pair in window.windows(2) {
+                total += pair[1].header.timestamp - pair[0].header.timestamp;
+                count += 1;
+            }
+            if count > 0 {
+                let avg = total / count;
+                if avg < TARGET_BLOCK_TIME {
+                    self.difficulty = self.difficulty.saturating_add(1);
+                } else if avg > TARGET_BLOCK_TIME {
+                    self.difficulty = self.difficulty.saturating_sub(1);
+                }
+            }
+        }
     }
 
     pub fn last_block_hash(&self) -> Option<String> {
@@ -113,6 +138,10 @@ impl Blockchain {
 
     pub fn len(&self) -> usize {
         self.chain.len()
+    }
+
+    pub fn difficulty(&self) -> u32 {
+        self.difficulty
     }
 
     pub fn replace(&mut self, new_chain: Vec<Block>) {
@@ -154,5 +183,46 @@ mod tests {
         // mempool cleared
         assert!(bc.mempool.is_empty());
         assert_eq!(bc.last_block_hash().unwrap(), block.hash());
+    }
+
+    #[test]
+    fn difficulty_increases_and_decreases() {
+        let mut bc = Blockchain::new();
+
+        // mine blocks too quickly
+        for _ in 0..DIFFICULTY_WINDOW {
+            let block = Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: bc.difficulty(),
+                },
+                transactions: vec![],
+            };
+            bc.add_block(block);
+        }
+        let diff_after_fast = bc.difficulty();
+        assert!(diff_after_fast > 1);
+
+        // mine blocks too slowly
+        let start = DIFFICULTY_WINDOW as u64 * 2;
+        for i in 0..DIFFICULTY_WINDOW {
+            let block = Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: String::new(),
+                    timestamp: start + (i as u64 * 2),
+                    nonce: 0,
+                    difficulty: bc.difficulty(),
+                },
+                transactions: vec![],
+            };
+            bc.add_block(block);
+        }
+        let diff_after_slow = bc.difficulty();
+        assert!(diff_after_slow < diff_after_fast);
+        assert!(diff_after_slow <= diff_after_fast);
     }
 }
