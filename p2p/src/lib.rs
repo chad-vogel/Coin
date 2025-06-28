@@ -1,4 +1,4 @@
-use coin::Blockchain;
+use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
 use prost::Message;
 use std::collections::HashSet;
@@ -149,17 +149,35 @@ impl Node {
                                         }
                                         coin_proto::proto::node_message::Msg::GetChain(_) => {
                                             let blocks = chain.lock().await.all();
+                                            let txs: Vec<Transaction> = blocks
+                                                .into_iter()
+                                                .flat_map(|b| b.transactions)
+                                                .collect();
                                             let msg = NodeMessage {
                                                 msg: Some(
                                                     coin_proto::proto::node_message::Msg::Chain(
-                                                        Chain { blocks },
+                                                        Chain { blocks: txs },
                                                     ),
                                                 ),
                                             };
                                             let _ = write_msg(&mut socket, &msg).await;
                                         }
                                         coin_proto::proto::node_message::Msg::Chain(c) => {
-                                            chain.lock().await.replace(c.blocks);
+                                            let blocks: Vec<Block> = c
+                                                .blocks
+                                                .into_iter()
+                                                .map(|tx| Block {
+                                                    header: BlockHeader {
+                                                        previous_hash: String::new(),
+                                                        merkle_root: tx.hash(),
+                                                        timestamp: 0,
+                                                        nonce: 0,
+                                                        difficulty: 0,
+                                                    },
+                                                    transactions: vec![tx],
+                                                })
+                                                .collect();
+                                            chain.lock().await.replace(blocks);
                                         }
                                         coin_proto::proto::node_message::Msg::Block(_b) => {
                                             // block handling not implemented yet
@@ -230,7 +248,21 @@ impl Node {
         write_msg(&mut stream, &get).await?;
         if let Ok(resp) = read_msg(&mut stream).await {
             if let Some(coin_proto::proto::node_message::Msg::Chain(c)) = resp.msg {
-                self.chain.lock().await.replace(c.blocks);
+                let blocks: Vec<Block> = c
+                    .blocks
+                    .into_iter()
+                    .map(|tx| Block {
+                        header: BlockHeader {
+                            previous_hash: String::new(),
+                            merkle_root: tx.hash(),
+                            timestamp: 0,
+                            nonce: 0,
+                            difficulty: 0,
+                        },
+                        transactions: vec![tx],
+                    })
+                    .collect();
+                self.chain.lock().await.replace(blocks);
             }
         }
         Ok(())
@@ -316,11 +348,16 @@ mod tests {
         let node_a = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
-        node_a.chain.lock().await.add_transaction(Transaction {
-            sender: "x".into(),
-            recipient: "y".into(),
-            amount: 2,
-        });
+        {
+            let mut chain = node_a.chain.lock().await;
+            chain.add_transaction(Transaction {
+                sender: "x".into(),
+                recipient: "y".into(),
+                amount: 2,
+            });
+            let block = chain.candidate_block();
+            chain.add_block(block);
+        }
 
         let node_b = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier);
         let (addrs_b, _) = node_b.start().await.unwrap();
