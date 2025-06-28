@@ -1,0 +1,26 @@
+name: Rust
+
+on:
+  push:
+    branches: [ main, work ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Format
+        run: cargo fmt -- --check
+      - name: Test
+        run: cargo test
+      - name: Coverage
+        run: cargo tarpaulin --timeout 60 --out Xml
