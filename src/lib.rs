@@ -6,12 +6,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const DIFFICULTY_WINDOW: usize = 3;
 /// Target time between blocks in seconds
 pub const TARGET_BLOCK_TIME: u64 = 1;
+/// Reward paid to miners for producing a block
+pub const BLOCK_SUBSIDY: u64 = 50;
 
 pub fn new_transaction(sender: String, recipient: String, amount: u64) -> Transaction {
     Transaction {
         sender,
         recipient,
         amount,
+    }
+}
+
+/// Create a coinbase transaction paying the block subsidy to `miner`
+pub fn coinbase_transaction(miner: String) -> Transaction {
+    Transaction {
+        sender: String::new(),
+        recipient: miner,
+        amount: BLOCK_SUBSIDY,
     }
 }
 
@@ -153,6 +164,22 @@ impl Blockchain {
     pub fn all(&self) -> Vec<Block> {
         self.chain.clone()
     }
+
+    /// Calculate the balance for `addr` by scanning the chain
+    pub fn balance(&self, addr: &str) -> i64 {
+        let mut bal: i64 = 0;
+        for block in &self.chain {
+            for tx in &block.transactions {
+                if tx.sender == addr && !tx.sender.is_empty() {
+                    bal -= tx.amount as i64;
+                }
+                if tx.recipient == addr {
+                    bal += tx.amount as i64;
+                }
+            }
+        }
+        bal
+    }
 }
 
 #[cfg(test)]
@@ -224,5 +251,22 @@ mod tests {
         let diff_after_slow = bc.difficulty();
         assert!(diff_after_slow < diff_after_fast);
         assert!(diff_after_slow <= diff_after_fast);
+    }
+
+    #[test]
+    fn balance_reflects_coinbase() {
+        let mut bc = Blockchain::new();
+        assert_eq!(bc.balance("miner"), 0);
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction("miner".into())],
+        });
+        assert_eq!(bc.balance("miner"), BLOCK_SUBSIDY as i64);
     }
 }
