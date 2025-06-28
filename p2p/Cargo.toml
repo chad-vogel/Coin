@@ -1,0 +1,9 @@
+[package]
+name = "coin-p2p"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+coin-proto = { path = "../proto" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+prost = "0.12"
