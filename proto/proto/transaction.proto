@@ -23,6 +23,19 @@ message Chain {
   repeated Transaction blocks = 1;
 }
 
+message BlockHeader {
+  string previous_hash = 1;
+  string merkle_root = 2;
+  uint64 timestamp = 3;
+  uint64 nonce = 4;
+  uint32 difficulty = 5;
+}
+
+message Block {
+  BlockHeader header = 1;
+  repeated Transaction transactions = 2;
+}
+
 message NodeMessage {
   oneof msg {
     Transaction transaction = 1;
@@ -32,5 +45,6 @@ message NodeMessage {
     Peers peers = 5;
     GetChain get_chain = 6;
     Chain chain = 7;
+    Block block = 8;
   }
 }

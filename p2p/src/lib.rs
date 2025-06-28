@@ -161,6 +161,9 @@ impl Node {
                                         coin_proto::proto::node_message::Msg::Chain(c) => {
                                             chain.lock().await.replace(c.blocks);
                                         }
+                                        coin_proto::proto::node_message::Msg::Block(_b) => {
+                                            // block handling not implemented yet
+                                        }
                                     },
                                     Err(_) => break,
                                 }
