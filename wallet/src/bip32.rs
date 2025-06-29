@@ -157,6 +157,10 @@ impl XPrv {
         }
     }
 
+    pub fn secret_key(&self) -> &SecretKey {
+        &self.secret
+    }
+
     pub fn to_string(&self, prefix: Prefix) -> String {
         let secp = Secp256k1::new();
         let mut data = Vec::with_capacity(78);

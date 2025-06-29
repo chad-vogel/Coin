@@ -65,6 +65,9 @@ fn valid_block(chain: &Blockchain, block: &Block) -> bool {
         {
             return false;
         }
+        if !tx.verify() {
+            return false;
+        }
         hasher.update(tx.hash());
     }
     let merkle = hex::encode(hasher.finalize());
@@ -416,11 +419,20 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coin_wallet::Wallet;
+    use hex_literal::hex;
     use std::net::SocketAddr;
     use tokio::time::{Duration, sleep};
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
     const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
+    const SEED: [u8; 16] = hex!("000102030405060708090a0b0c0d0e0f");
+
+    fn sign_for(path: &str, tx: &mut Transaction) {
+        let wallet = Wallet::from_seed(&SEED).unwrap();
+        let sk = wallet.derive_priv(path).unwrap().secret_key().clone();
+        tx.sign(&sk);
+    }
 
     #[tokio::test]
     async fn node_connects_and_pings() {
@@ -432,11 +444,13 @@ mod tests {
         sleep(Duration::from_millis(200)).await;
         let peers = node.peers().await;
         assert!(peers.iter().any(|p| p.port() == addr.port()));
-        let tx = Transaction {
+        let mut tx = Transaction {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
+            signature: Vec::new(),
         };
+        sign_for("m/0'/0/0", &mut tx);
         send_transaction(&addr.to_string(), &tx).await.unwrap();
         let rec = tokio::time::timeout(Duration::from_secs(1), rx.recv())
             .await
@@ -479,11 +493,14 @@ mod tests {
         let addr_a = addrs_a[0];
         {
             let mut chain = node_a.chain.lock().await;
-            chain.add_transaction(Transaction {
+            let mut tx = Transaction {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 2,
-            });
+                signature: Vec::new(),
+            };
+            sign_for("m/0'/0/0", &mut tx);
+            chain.add_transaction(tx);
             let block = chain.candidate_block();
             chain.add_block(block);
         }
@@ -504,6 +521,13 @@ mod tests {
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut tx = Transaction {
+            sender: A1.into(),
+            recipient: A2.into(),
+            amount: 3,
+            signature: Vec::new(),
+        };
+        sign_for("m/0'/0/0", &mut tx);
         let block = coin_proto::proto::Block {
             header: Some(coin_proto::proto::BlockHeader {
                 previous_hash: String::new(),
@@ -512,11 +536,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             }),
-            transactions: vec![Transaction {
-                sender: A1.into(),
-                recipient: A2.into(),
-                amount: 3,
-            }],
+            transactions: vec![tx],
         };
         let chain_msg = NodeMessage {
             msg: Some(coin_proto::proto::node_message::Msg::Chain(Chain {
@@ -533,11 +553,13 @@ mod tests {
         let node = Node::new(0, NodeType::Verifier);
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
-        let tx = Transaction {
+        let mut tx = Transaction {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
+            signature: Vec::new(),
         };
+        sign_for("m/0'/0/0", &mut tx);
         let mut h = Sha256::new();
         h.update(tx.hash());
         let merkle = hex::encode(h.finalize());
@@ -573,11 +595,13 @@ mod tests {
 
         node_a.peers.lock().await.insert(addr_b);
 
-        let tx = Transaction {
+        let mut tx = Transaction {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 2,
+            signature: Vec::new(),
         };
+        sign_for("m/0'/0/0", &mut tx);
         let mut h = Sha256::new();
         h.update(tx.hash());
         let merkle = hex::encode(h.finalize());
@@ -604,19 +628,24 @@ mod tests {
     #[tokio::test]
     async fn validate_block_logic() {
         let mut chain = Blockchain::new();
-        chain.add_transaction(Transaction {
+        let mut tx0 = Transaction {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
-        });
+            signature: Vec::new(),
+        };
+        sign_for("m/0'/0/0", &mut tx0);
+        chain.add_transaction(tx0);
         let genesis = chain.candidate_block();
         chain.add_block(genesis.clone());
 
-        let tx = Transaction {
+        let mut tx = Transaction {
             sender: A2.into(),
             recipient: A1.into(),
             amount: 2,
+            signature: Vec::new(),
         };
+        sign_for("m/0'/0/1", &mut tx);
         let mut h = Sha256::new();
         h.update(tx.hash());
         let merkle = hex::encode(h.finalize());
@@ -644,11 +673,14 @@ mod tests {
         let (_addrs, _rx) = node.start().await.unwrap();
         {
             let mut chain = node.chain.lock().await;
-            chain.add_transaction(Transaction {
+            let mut tx = Transaction {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 1,
-            });
+                signature: Vec::new(),
+            };
+            sign_for("m/0'/0/0", &mut tx);
+            chain.add_transaction(tx);
         }
         sleep(Duration::from_millis(200)).await;
         assert_eq!(node.chain_len().await, 1);

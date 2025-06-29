@@ -13,3 +13,7 @@ hex = "0.4"
 miner = { path = "../miner" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+
+[dev-dependencies]
+coin-wallet = { path = "../wallet" }
+hex-literal = "0.4"

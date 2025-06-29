@@ -1,6 +1,8 @@
 use bs58;
 pub use coin_proto::proto::Transaction;
 use prost::Message;
+use ripemd::Ripemd160;
+use secp256k1;
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
@@ -23,6 +25,7 @@ pub fn new_transaction(
         sender: sender.into(),
         recipient: recipient.into(),
         amount,
+        signature: Vec::new(),
     }
 }
 
@@ -32,6 +35,7 @@ pub fn coinbase_transaction(miner: impl Into<String>) -> Transaction {
         sender: String::new(),
         recipient: miner.into(),
         amount: BLOCK_SUBSIDY,
+        signature: Vec::new(),
     }
 }
 
@@ -54,6 +58,8 @@ pub fn valid_address(addr: &str) -> bool {
 
 pub trait TransactionExt {
     fn hash(&self) -> String;
+    fn sign(&mut self, sk: &secp256k1::SecretKey);
+    fn verify(&self) -> bool;
 }
 
 impl TransactionExt for Transaction {
@@ -64,6 +70,51 @@ impl TransactionExt for Transaction {
         hasher.update(self.amount.to_be_bytes());
         let result = hasher.finalize();
         hex::encode(result)
+    }
+
+    fn sign(&mut self, sk: &secp256k1::SecretKey) {
+        let secp = secp256k1::Secp256k1::new();
+        let msg_hash = Sha256::digest(self.hash().as_bytes());
+        let msg = secp256k1::Message::from_slice(&msg_hash).expect("32 bytes");
+        let sig = secp.sign_ecdsa_recoverable(&msg, sk);
+        let (rec_id, data) = sig.serialize_compact();
+        self.signature.clear();
+        self.signature.push(rec_id.to_i32() as u8);
+        self.signature.extend_from_slice(&data);
+    }
+
+    fn verify(&self) -> bool {
+        if self.signature.len() != 65 {
+            return false;
+        }
+        let rec_id = match secp256k1::ecdsa::RecoveryId::from_i32(self.signature[0] as i32) {
+            Ok(id) => id,
+            Err(_) => return false,
+        };
+        let mut data = [0u8; 64];
+        data.copy_from_slice(&self.signature[1..]);
+        let sig = match secp256k1::ecdsa::RecoverableSignature::from_compact(&data, rec_id) {
+            Ok(s) => s,
+            Err(_) => return false,
+        };
+        let secp = secp256k1::Secp256k1::new();
+        let msg_hash = Sha256::digest(self.hash().as_bytes());
+        let msg = secp256k1::Message::from_slice(&msg_hash).expect("32 bytes");
+        let pk = match secp.recover_ecdsa(&msg, &sig) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        // derive address from recovered public key
+        let pk_bytes = pk.serialize();
+        let sha = Sha256::digest(pk_bytes);
+        let rip = Ripemd160::digest(sha);
+        let mut payload = Vec::with_capacity(25);
+        payload.push(0x00);
+        payload.extend_from_slice(&rip);
+        let check = Sha256::digest(Sha256::digest(&payload));
+        payload.extend_from_slice(&check[..4]);
+        let addr = bs58::encode(payload).into_string();
+        addr == self.sender
     }
 }
 
