@@ -20,7 +20,7 @@ message Peers {
 message GetChain {}
 
 message Chain {
-  repeated Transaction blocks = 1;
+  repeated Block blocks = 1;
 }
 
 message BlockHeader {
