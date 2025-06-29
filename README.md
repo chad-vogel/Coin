@@ -44,7 +44,9 @@ started with:
 cargo run -p coin-p2p -- --port <PORT> --node-type miner [--min-peers N]
 ```
 Replace `<PORT>` with the TCP port to listen on. `--min-peers` controls how many peers must
-be connected before a miner begins hashing and defaults to `1`. Additional nodes can be run as
+be connected before a miner begins hashing and defaults to `1`. The first miner can
+run with `--min-peers 0` and will mine a genesis block even without pending transactions.
+Additional nodes can be run as
 `wallet` or `verifier` types using the same command structure:
 
 ```bash

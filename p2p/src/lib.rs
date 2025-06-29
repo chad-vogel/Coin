@@ -382,7 +382,7 @@ impl Node {
                     }
                     {
                         let mut chain = chain.lock().await;
-                        if chain.mempool_len() > 0 {
+                        if chain.len() == 0 || chain.mempool_len() > 0 {
                             let block = mine_block(&mut chain, &reward);
                             broadcast_block_internal(peers.clone(), &block).await;
                         }
@@ -807,6 +807,21 @@ mod tests {
         let mut bad = block.clone();
         bad.header.merkle_root = String::new();
         assert!(!valid_block(&chain, &bad));
+    }
+
+    #[tokio::test]
+    async fn miner_mines_genesis_block() {
+        let miner = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Miner,
+            Some(0),
+            Some(A1.to_string()),
+            None,
+        );
+        let (_addrs, _rx) = miner.start().await.unwrap();
+        sleep(Duration::from_millis(200)).await;
+        assert_eq!(miner.chain_len().await, 1);
     }
 
     #[tokio::test]
