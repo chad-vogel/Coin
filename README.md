@@ -37,9 +37,10 @@ The `coin-p2p` crate provides a simple command line interface. A miner can be
 started with:
 
 ```bash
-cargo run -p coin-p2p -- --port <PORT> --node-type miner
+cargo run -p coin-p2p -- --port <PORT> --node-type miner [--min-peers N]
 ```
-Replace `<PORT>` with the TCP port to listen on. Additional nodes can be run as
+Replace `<PORT>` with the TCP port to listen on. `--min-peers` controls how many peers must
+be connected before a miner begins hashing and defaults to `1`. Additional nodes can be run as
 `wallet` or `verifier` types using the same command structure:
 
 ```bash
