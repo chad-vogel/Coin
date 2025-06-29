@@ -23,6 +23,10 @@ pub struct Config {
     pub seed_peers: Vec<String>,
     #[serde(default = "default_peers_file")]
     pub peers_file: String,
+    #[serde(default = "default_network_id")]
+    pub network_id: String,
+    #[serde(default = "default_protocol_version")]
+    pub protocol_version: u32,
 }
 
 fn default_chain_file() -> String {
@@ -31,6 +35,14 @@ fn default_chain_file() -> String {
 
 fn default_peers_file() -> String {
     "peers.txt".to_string()
+}
+
+fn default_network_id() -> String {
+    "coin".to_string()
+}
+
+fn default_protocol_version() -> u32 {
+    1
 }
 
 impl Config {
@@ -72,5 +84,7 @@ peers_file: "p.txt"
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.seed_peers, vec!["127.0.0.1:9000".to_string()]);
         assert_eq!(cfg.peers_file, "p.txt");
+        assert_eq!(cfg.network_id, "coin");
+        assert_eq!(cfg.protocol_version, 1);
     }
 }
