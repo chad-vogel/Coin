@@ -601,7 +601,14 @@ impl Node {
         if let Ok(resp) = read_msg(&mut stream).await {
             if let NodeMessage::Chain(c) = resp {
                 let blocks: Vec<Block> = c.blocks.into_iter().filter_map(Block::from_rpc).collect();
-                self.chain.lock().await.replace(blocks);
+                if Blockchain::validate_chain(&blocks) {
+                    self.chain.lock().await.replace(blocks);
+                } else {
+                    return Err(tokio::io::Error::new(
+                        tokio::io::ErrorKind::InvalidData,
+                        "invalid chain",
+                    ));
+                }
             }
         }
         Ok(())
@@ -805,7 +812,8 @@ mod tests {
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
-            let block = chain.candidate_block();
+            let mut block = chain.candidate_block();
+            block.header.difficulty = 0;
             chain.add_block(block);
         }
 
@@ -827,6 +835,66 @@ mod tests {
         node_b.connect(addr_a).await.unwrap();
         node_b.sync_from_peer(addr_a).await.unwrap();
         assert_eq!(node_b.chain_len().await, 1);
+        node_a.peers.lock().await.remove(&addr_b);
+        node_b.peers.lock().await.remove(&addr_a);
+    }
+
+    #[tokio::test]
+    async fn sync_from_peer_rejects_invalid_chain() {
+        let node_a = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs_a, _) = node_a.start().await.unwrap();
+        let addr_a = addrs_a[0];
+        {
+            let mut chain = node_a.chain.lock().await;
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![Transaction {
+                    sender: A1.into(),
+                    recipient: A2.into(),
+                    amount: 2,
+                    fee: 0,
+                    signature: Vec::new(),
+                    encrypted_message: Vec::new(),
+                }],
+            });
+        }
+
+        let node_b = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs_b, _) = node_b.start().await.unwrap();
+        let addr_b = addrs_b[0];
+        node_b.connect(addr_a).await.unwrap();
+        assert!(node_b.sync_from_peer(addr_a).await.is_err());
+        assert_eq!(node_b.chain_len().await, 0);
         node_a.peers.lock().await.remove(&addr_b);
         node_b.peers.lock().await.remove(&addr_a);
     }
