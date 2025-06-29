@@ -19,6 +19,7 @@ use tokio::time::{Duration, Instant, timeout};
 pub mod config;
 
 const DEFAULT_MAX_MSGS_PER_SEC: u32 = 10;
+const DEFAULT_MAX_PEERS: usize = 32;
 
 /// Send a length-prefixed protobuf message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
@@ -156,6 +157,7 @@ pub struct Node {
     network_id: String,
     protocol_version: u32,
     max_msgs_per_sec: u32,
+    max_peers: usize,
 }
 
 impl Node {
@@ -168,6 +170,7 @@ impl Node {
         network_id: Option<String>,
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
+        max_peers: Option<usize>,
     ) -> Self {
         Self {
             listeners,
@@ -182,6 +185,7 @@ impl Node {
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
+            max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
         }
     }
 
@@ -200,6 +204,7 @@ impl Node {
         network_id: Option<String>,
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
+        max_peers: Option<usize>,
     ) -> Self {
         Self {
             listeners,
@@ -214,6 +219,7 @@ impl Node {
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
+            max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
         }
     }
 
@@ -264,6 +270,7 @@ impl Node {
         let chain = self.chain.clone();
         let msg_times = self.msg_times.clone();
         let max = self.max_msgs_per_sec;
+        let max_peers = self.max_peers;
         let network_id = self.network_id.clone();
         let protocol_version = self.protocol_version;
 
@@ -276,9 +283,13 @@ impl Node {
             let nid = network_id.clone();
             let ver = protocol_version;
             let max = max;
+            let cap = max_peers;
             tokio::spawn(async move {
                 loop {
                     if let Ok((mut socket, _addr)) = listener.accept().await {
+                        if peers.lock().await.len() >= cap {
+                            continue;
+                        }
                         let tx = tx.clone();
                         let peers = peers.clone();
                         let chain = chain.clone();
@@ -301,6 +312,15 @@ impl Node {
                             } else {
                                 return;
                             }
+                            if let Ok(a) = socket.peer_addr() {
+                                let mut set = peers.lock().await;
+                                if set.len() >= cap {
+                                    return;
+                                }
+                                set.insert(a);
+                                drop(set);
+                                rates.lock().await.insert(a, (Instant::now(), 0));
+                            }
                             let resp = NodeMessage {
                                 msg: Some(coin_proto::proto::node_message::Msg::Handshake(
                                     Handshake {
@@ -311,10 +331,6 @@ impl Node {
                             };
                             if write_msg(&mut socket, &resp).await.is_err() {
                                 return;
-                            }
-                            if let Ok(a) = socket.peer_addr() {
-                                peers.lock().await.insert(a);
-                                rates.lock().await.insert(a, (Instant::now(), 0));
                             }
                             loop {
                                 match read_msg(&mut socket).await {
@@ -696,6 +712,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
@@ -746,6 +763,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -781,6 +799,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -795,6 +814,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -830,6 +850,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -845,6 +866,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -897,6 +919,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -958,6 +981,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -966,6 +990,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1068,6 +1093,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = miner.start().await.unwrap();
         sleep(Duration::from_millis(200)).await;
@@ -1082,6 +1108,7 @@ mod tests {
             NodeType::Miner,
             Some(0),
             Some(A1.to_string()),
+            None,
             None,
             None,
             None,
@@ -1128,6 +1155,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -1168,6 +1196,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
@@ -1189,6 +1218,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -1202,6 +1232,7 @@ mod tests {
             None,
             None,
             Some(file.clone()),
+            None,
             None,
             None,
             None,
@@ -1221,6 +1252,7 @@ mod tests {
             Some("net1".into()),
             Some(1),
             None,
+            None,
         );
         let (addrs, _) = node_a.start().await.unwrap();
         let addr = addrs[0];
@@ -1232,6 +1264,7 @@ mod tests {
             None,
             Some("net2".into()),
             Some(1),
+            None,
             None,
         );
         assert!(node_b.connect(addr).await.is_err());
@@ -1245,6 +1278,7 @@ mod tests {
             None,
             Some("net1".into()),
             Some(2),
+            None,
             None,
         );
         assert!(node_c.connect(addr).await.is_err());
@@ -1263,6 +1297,7 @@ mod tests {
             None,
             None,
             Some(5),
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1290,5 +1325,37 @@ mod tests {
             }
         }
         assert!(closed);
+    }
+
+    #[tokio::test]
+    async fn reject_excess_incoming_peers() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(1),
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+
+        let mut s1 = TcpStream::connect(addr).await.unwrap();
+        let hs = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::Handshake(Handshake {
+                network_id: "coin".into(),
+                version: 1,
+            })),
+        };
+        write_msg(&mut s1, &hs).await.unwrap();
+        let _ = read_msg(&mut s1).await.unwrap();
+
+        let mut s2 = TcpStream::connect(addr).await.unwrap();
+        write_msg(&mut s2, &hs).await.unwrap();
+        let res = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
+        assert!(res.is_err() || res.unwrap().is_err());
     }
 }
