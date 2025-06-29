@@ -13,6 +13,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, timeout};
 
+pub mod config;
+
 /// Send a length-prefixed protobuf message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
     let mut buf = Vec::new();
@@ -43,7 +45,7 @@ async fn read_with_timeout(socket: &mut TcpStream) -> tokio::io::Result<bool> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, serde::Deserialize)]
 pub enum NodeType {
     Wallet,
     Miner,
@@ -118,23 +120,30 @@ async fn broadcast_block_internal(peers: Arc<Mutex<HashSet<SocketAddr>>>, block:
 
 /// Simple P2P node maintaining a peer address list and pinging peers
 pub struct Node {
-    port: u16,
+    listeners: Vec<SocketAddr>,
     peers: Arc<Mutex<HashSet<SocketAddr>>>,
     ping_interval: Duration,
     node_type: NodeType,
     chain: Arc<Mutex<Blockchain>>,
     min_peers: usize,
+    wallet_address: Option<String>,
 }
 
 impl Node {
-    pub fn new(port: u16, node_type: NodeType, min_peers: Option<usize>) -> Self {
+    pub fn new(
+        listeners: Vec<SocketAddr>,
+        node_type: NodeType,
+        min_peers: Option<usize>,
+        wallet_address: Option<String>,
+    ) -> Self {
         Self {
-            port,
+            listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
             ping_interval: Duration::from_secs(5),
             node_type,
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
+            wallet_address,
         }
     }
 
@@ -144,18 +153,20 @@ impl Node {
 
     #[allow(dead_code)]
     pub fn with_interval(
-        port: u16,
+        listeners: Vec<SocketAddr>,
         interval: Duration,
         node_type: NodeType,
         min_peers: Option<usize>,
+        wallet_address: Option<String>,
     ) -> Self {
         Self {
-            port,
+            listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
             ping_interval: interval,
             node_type,
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
+            wallet_address,
         }
     }
 
@@ -165,17 +176,18 @@ impl Node {
 
     /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
     pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
-        let addr_v4 = format!("0.0.0.0:{}", self.port);
-        let addr_v6 = format!("[::]:{}", self.port);
-        let listener_v4 = TcpListener::bind(&addr_v4).await?;
-        let listener_v6 = TcpListener::bind(&addr_v6).await?;
-        let local_addrs = vec![listener_v4.local_addr()?, listener_v6.local_addr()?];
+        let mut listeners = Vec::new();
+        for addr in &self.listeners {
+            listeners.push(TcpListener::bind(addr).await?);
+        }
+        let local_addrs: Vec<SocketAddr> =
+            listeners.iter().map(|l| l.local_addr().unwrap()).collect();
         let (tx, rx) = mpsc::channel(8);
         let peers = self.peers.clone();
         let chain = self.chain.clone();
 
         // accept loop for each listener
-        for listener in [listener_v4, listener_v6] {
+        for listener in listeners {
             let tx = tx.clone();
             let peers = peers.clone();
             let chain = chain.clone();
@@ -332,6 +344,10 @@ impl Node {
             let peers = self.peers.clone();
             let chain = self.chain.clone();
             let min = self.min_peers;
+            let reward = self
+                .wallet_address
+                .clone()
+                .unwrap_or_else(|| "miner".to_string());
             tokio::spawn(async move {
                 loop {
                     while peers.lock().await.len() < min {
@@ -340,7 +356,7 @@ impl Node {
                     {
                         let mut chain = chain.lock().await;
                         if chain.mempool_len() > 0 {
-                            let block = mine_block(&mut chain, "miner");
+                            let block = mine_block(&mut chain, &reward);
                             broadcast_block_internal(peers.clone(), &block).await;
                         }
                     }
@@ -446,7 +462,13 @@ mod tests {
 
     #[tokio::test]
     async fn node_connects_and_pings() {
-        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet, None);
+        let node = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Wallet,
+            None,
+            None,
+        );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -485,7 +507,12 @@ mod tests {
 
     #[tokio::test]
     async fn peers_message_updates_list() {
-        let node = Node::new(0, NodeType::Wallet, None);
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+        );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -502,7 +529,13 @@ mod tests {
 
     #[tokio::test]
     async fn unreachable_peer_gets_dropped() {
-        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet, None);
+        let node = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Wallet,
+            None,
+            None,
+        );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
         node.peers.lock().await.insert(unreachable);
@@ -512,7 +545,13 @@ mod tests {
 
     #[tokio::test]
     async fn sync_from_peer_updates_chain() {
-        let node_a = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier, None);
+        let node_a = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
         {
@@ -530,7 +569,13 @@ mod tests {
             chain.add_block(block);
         }
 
-        let node_b = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier, None);
+        let node_b = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
         node_b.connect(addr_a).await.unwrap();
@@ -542,7 +587,12 @@ mod tests {
 
     #[tokio::test]
     async fn chain_message_updates_chain() {
-        let node = Node::new(0, NodeType::Wallet, None);
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+        );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -576,7 +626,12 @@ mod tests {
 
     #[tokio::test]
     async fn block_message_updates_chain() {
-        let node = Node::new(0, NodeType::Verifier, None);
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut tx = Transaction {
@@ -612,11 +667,23 @@ mod tests {
 
     #[tokio::test]
     async fn broadcast_block_propagates() {
-        let node_a = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier, None);
+        let node_a = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
 
-        let node_b = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier, None);
+        let node_b = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
 
@@ -699,7 +766,13 @@ mod tests {
 
     #[tokio::test]
     async fn miner_mines_pending_tx() {
-        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Miner, Some(0));
+        let node = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Miner,
+            Some(0),
+            Some(A1.to_string()),
+        );
         let (_addrs, _rx) = node.start().await.unwrap();
         {
             let mut chain = node.chain.lock().await;
@@ -729,7 +802,13 @@ mod tests {
 
     #[tokio::test]
     async fn miner_waits_for_peers() {
-        let miner = Node::with_interval(0, Duration::from_millis(50), NodeType::Miner, Some(1));
+        let miner = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Miner,
+            Some(1),
+            Some(A1.to_string()),
+        );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
             let mut chain = miner.chain.lock().await;
@@ -757,7 +836,13 @@ mod tests {
         // mining should wait for peers
         assert_eq!(miner.chain_len().await, 1);
 
-        let peer = Node::with_interval(0, Duration::from_millis(50), NodeType::Verifier, None);
+        let peer = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Verifier,
+            None,
+            None,
+        );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
         sleep(Duration::from_millis(200)).await;
