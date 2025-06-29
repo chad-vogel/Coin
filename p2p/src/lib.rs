@@ -474,6 +474,7 @@ mod tests {
         let addr = addrs[0];
         {
             let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
             chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
@@ -482,7 +483,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1.clone())],
+                transactions: vec![coinbase_transaction(A1.clone(), reward)],
             });
         }
         node.connect(addr).await.unwrap();
@@ -776,6 +777,7 @@ mod tests {
         let (_addrs, _rx) = node.start().await.unwrap();
         {
             let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
             chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
@@ -784,7 +786,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1)],
+                transactions: vec![coinbase_transaction(A1, reward)],
             });
             let mut tx = Transaction {
                 sender: A1.into(),
@@ -812,6 +814,7 @@ mod tests {
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
             let mut chain = miner.chain.lock().await;
+            let reward = chain.block_subsidy();
             chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
@@ -820,7 +823,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1)],
+                transactions: vec![coinbase_transaction(A1, reward)],
             });
             let mut tx = Transaction {
                 sender: A1.into(),

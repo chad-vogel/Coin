@@ -13,8 +13,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const DIFFICULTY_WINDOW: usize = 3;
 /// Target time between blocks in seconds
 pub const TARGET_BLOCK_TIME: u64 = 1;
-/// Reward paid to miners for producing a block
-pub const BLOCK_SUBSIDY: u64 = 50;
+/// Smallest unit of the coin (1 coin = 100 million units)
+pub const COIN: u64 = 100_000_000;
+/// Initial reward paid to miners for producing a block
+pub const BLOCK_SUBSIDY: u64 = 50 * COIN;
+/// Number of blocks between reward halvings. With an initial subsidy of 50 this
+/// caps total issuance at 20 million coins.
+pub const HALVING_INTERVAL: u64 = 200_000;
+/// Maximum number of units that will ever exist
+pub const MAX_SUPPLY: u64 = 20_000_000 * COIN;
 
 pub fn new_transaction(
     sender: impl Into<String>,
@@ -30,12 +37,12 @@ pub fn new_transaction(
     }
 }
 
-/// Create a coinbase transaction paying the block subsidy to `miner`
-pub fn coinbase_transaction(miner: impl Into<String>) -> Transaction {
+/// Create a coinbase transaction paying `amount` to `miner`
+pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transaction {
     Transaction {
         sender: String::new(),
         recipient: miner.into(),
-        amount: BLOCK_SUBSIDY,
+        amount,
         signature: Vec::new(),
         encrypted_message: Vec::new(),
     }
@@ -285,6 +292,36 @@ impl Blockchain {
         }
     }
 
+    /// Total amount of coins mined so far
+    pub fn total_mined(&self) -> u64 {
+        self.chain
+            .iter()
+            .flat_map(|b| &b.transactions)
+            .filter(|tx| tx.sender.is_empty())
+            .map(|tx| tx.amount)
+            .sum()
+    }
+
+    /// Calculate the block subsidy for the given height and mined amount
+    pub fn subsidy_for_height(height: u64, mined: u64) -> u64 {
+        let halvings = height / HALVING_INTERVAL;
+        if halvings >= 64 {
+            return 0;
+        }
+        let mut reward = BLOCK_SUBSIDY >> halvings;
+        if mined >= MAX_SUPPLY {
+            reward = 0;
+        } else if mined + reward > MAX_SUPPLY {
+            reward = MAX_SUPPLY - mined;
+        }
+        reward
+    }
+
+    /// Subsidy for the next block mined on this chain
+    pub fn block_subsidy(&self) -> u64 {
+        Self::subsidy_for_height(self.chain.len() as u64, self.total_mined())
+    }
+
     /// Append a confirmed block to the chain and clear contained transactions
     pub fn add_block(&mut self, block: Block) {
         for tx in &block.transactions {
@@ -408,7 +445,10 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1), coinbase_transaction(A2)],
+            transactions: vec![
+                coinbase_transaction(A1, bc.block_subsidy()),
+                coinbase_transaction(A2, bc.block_subsidy()),
+            ],
         });
         let tx1 = new_transaction(A1, A2, 5);
         let tx2 = new_transaction(A2, A1, 7);
@@ -477,9 +517,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1)],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
         });
-        assert_eq!(bc.balance(A1), BLOCK_SUBSIDY as i64);
+        assert_eq!(bc.balance(A1), bc.block_subsidy() as i64);
     }
 
     #[test]
@@ -509,9 +549,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1)],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
         });
-        let tx = new_transaction(A1, A2, BLOCK_SUBSIDY + 1);
+        let tx = new_transaction(A1, A2, bc.block_subsidy() + 1);
         assert!(!bc.add_transaction(tx));
     }
 
@@ -526,7 +566,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1)],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
         });
         let tmp = tempfile::NamedTempFile::new().unwrap();
         bc.save(tmp.path()).unwrap();
