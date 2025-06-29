@@ -20,6 +20,7 @@ pub mod config;
 
 const DEFAULT_MAX_MSGS_PER_SEC: u32 = 10;
 const DEFAULT_MAX_PEERS: usize = 32;
+const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
 
 /// Send a length-prefixed protobuf message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
@@ -37,6 +38,12 @@ async fn read_msg(socket: &mut TcpStream) -> tokio::io::Result<NodeMessage> {
     let mut len_buf = [0u8; 4];
     socket.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
+    if len > MAX_MSG_BYTES {
+        return Err(tokio::io::Error::new(
+            tokio::io::ErrorKind::InvalidData,
+            "message too large",
+        ));
+    }
     let mut buf = vec![0u8; len];
     socket.read_exact(&mut buf).await?;
     Ok(NodeMessage::decode(&buf[..])
@@ -1356,6 +1363,38 @@ mod tests {
         let mut s2 = TcpStream::connect(addr).await.unwrap();
         write_msg(&mut s2, &hs).await.unwrap();
         let res = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
+        assert!(res.is_err() || res.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn reject_oversized_message() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let hs = NodeMessage {
+            msg: Some(coin_proto::proto::node_message::Msg::Handshake(Handshake {
+                network_id: "coin".into(),
+                version: 1,
+            })),
+        };
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let len = ((MAX_MSG_BYTES as u32) + 1).to_be_bytes();
+        stream.write_all(&len).await.unwrap();
+        let res = timeout(Duration::from_millis(100), read_msg(&mut stream)).await;
         assert!(res.is_err() || res.unwrap().is_err());
     }
 }
