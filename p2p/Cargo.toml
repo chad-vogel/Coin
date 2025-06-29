@@ -10,3 +10,4 @@ prost = "0.12"
 coin = { path = ".." }
 sha2 = "0.10"
 hex = "0.4"
+miner = { path = "../miner" }

@@ -108,6 +108,7 @@ dependencies = [
  "coin",
  "coin-proto",
  "hex",
+ "miner",
  "prost",
  "sha2",
  "tokio",
