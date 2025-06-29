@@ -175,119 +175,109 @@ impl Node {
                         tokio::spawn(async move {
                             loop {
                                 match read_msg(&mut socket).await {
-                                    Ok(msg) => match msg.msg.unwrap() {
-                                        coin_proto::proto::node_message::Msg::Transaction(t) => {
-                                            {
-                                                let mut chain = chain.lock().await;
-                                                chain.add_transaction(t.clone());
-                                            }
-                                            let _ = tx.send(t).await;
-                                        }
-                                        coin_proto::proto::node_message::Msg::Ping(_) => {
-                                            let resp = NodeMessage {
-                                                msg: Some(
-                                                    coin_proto::proto::node_message::Msg::Pong(
-                                                        Pong {},
-                                                    ),
-                                                ),
-                                            };
-                                            let _ = write_msg(&mut socket, &resp).await;
-                                        }
-                                        coin_proto::proto::node_message::Msg::Pong(_) => {}
-                                        coin_proto::proto::node_message::Msg::GetPeers(_) => {
-                                            let list: Vec<String> = peers
-                                                .lock()
-                                                .await
-                                                .iter()
-                                                .map(|a| a.to_string())
-                                                .collect();
-                                            let msg = NodeMessage {
-                                                msg: Some(
-                                                    coin_proto::proto::node_message::Msg::Peers(
-                                                        Peers { addrs: list },
-                                                    ),
-                                                ),
-                                            };
-                                            let _ = write_msg(&mut socket, &msg).await;
-                                        }
-                                        coin_proto::proto::node_message::Msg::Peers(p) => {
-                                            for s in p.addrs {
-                                                if let Ok(mut addrs) = s.to_socket_addrs() {
-                                                    if let Some(addr) = addrs.next() {
-                                                        peers.lock().await.insert(addr);
+                                    Ok(msg) => {
+                                        if let Some(m) = msg.msg {
+                                            match m {
+                                                coin_proto::proto::node_message::Msg::Transaction(t) => {
+                                                    let mut chain = chain.lock().await;
+                                                    if chain.add_transaction(t.clone()) {
+                                                        let _ = tx.send(t.clone()).await;
                                                     }
                                                 }
-                                            }
-                                        }
-                                        coin_proto::proto::node_message::Msg::GetChain(_) => {
-                                            let blocks = chain.lock().await.all();
-                                            let proto_blocks: Vec<coin_proto::proto::Block> =
-                                                blocks
-                                                    .into_iter()
-                                                    .map(|b| coin_proto::proto::Block {
-                                                        header: Some(
-                                                            coin_proto::proto::BlockHeader {
-                                                                previous_hash: b
-                                                                    .header
-                                                                    .previous_hash,
+                                                coin_proto::proto::node_message::Msg::Ping(_) => {
+                                                    let resp = NodeMessage {
+                                                        msg: Some(
+                                                            coin_proto::proto::node_message::Msg::Pong(Pong {}),
+                                                        ),
+                                                    };
+                                                    let _ = write_msg(&mut socket, &resp).await;
+                                                }
+                                                coin_proto::proto::node_message::Msg::Pong(_) => {}
+                                                coin_proto::proto::node_message::Msg::GetPeers(_) => {
+                                                    let list: Vec<String> = peers
+                                                        .lock()
+                                                        .await
+                                                        .iter()
+                                                        .map(|a| a.to_string())
+                                                        .collect();
+                                                    let msg = NodeMessage {
+                                                        msg: Some(
+                                                            coin_proto::proto::node_message::Msg::Peers(Peers { addrs: list }),
+                                                        ),
+                                                    };
+                                                    let _ = write_msg(&mut socket, &msg).await;
+                                                }
+                                                coin_proto::proto::node_message::Msg::Peers(p) => {
+                                                    for s in p.addrs {
+                                                        if let Ok(mut addrs) = s.to_socket_addrs() {
+                                                            if let Some(addr) = addrs.next() {
+                                                                peers.lock().await.insert(addr);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                coin_proto::proto::node_message::Msg::GetChain(_) => {
+                                                    let blocks = chain.lock().await.all();
+                                                    let proto_blocks: Vec<coin_proto::proto::Block> = blocks
+                                                        .into_iter()
+                                                        .map(|b| coin_proto::proto::Block {
+                                                            header: Some(coin_proto::proto::BlockHeader {
+                                                                previous_hash: b.header.previous_hash,
                                                                 merkle_root: b.header.merkle_root,
                                                                 timestamp: b.header.timestamp,
                                                                 nonce: b.header.nonce,
                                                                 difficulty: b.header.difficulty,
-                                                            },
-                                                        ),
-                                                        transactions: b.transactions,
-                                                    })
-                                                    .collect();
-                                            let msg = NodeMessage {
-                                                msg: Some(
-                                                    coin_proto::proto::node_message::Msg::Chain(
-                                                        Chain {
+                                                            }),
+                                                            transactions: b.transactions,
+                                                        })
+                                                        .collect();
+                                                    let msg = NodeMessage {
+                                                        msg: Some(coin_proto::proto::node_message::Msg::Chain(Chain {
                                                             blocks: proto_blocks,
-                                                        },
-                                                    ),
-                                                ),
-                                            };
-                                            let _ = write_msg(&mut socket, &msg).await;
-                                        }
-                                        coin_proto::proto::node_message::Msg::Chain(c) => {
-                                            let blocks: Vec<Block> = c
-                                                .blocks
-                                                .into_iter()
-                                                .filter_map(|pb| {
-                                                    pb.header.map(|h| Block {
-                                                        header: BlockHeader {
-                                                            previous_hash: h.previous_hash,
-                                                            merkle_root: h.merkle_root,
-                                                            timestamp: h.timestamp,
-                                                            nonce: h.nonce,
-                                                            difficulty: h.difficulty,
-                                                        },
-                                                        transactions: pb.transactions,
-                                                    })
-                                                })
-                                                .collect();
-                                            chain.lock().await.replace(blocks);
-                                        }
-                                        coin_proto::proto::node_message::Msg::Block(b) => {
-                                            if let Some(h) = b.header {
-                                                let block = Block {
-                                                    header: BlockHeader {
-                                                        previous_hash: h.previous_hash,
-                                                        merkle_root: h.merkle_root,
-                                                        timestamp: h.timestamp,
-                                                        nonce: h.nonce,
-                                                        difficulty: h.difficulty,
-                                                    },
-                                                    transactions: b.transactions,
-                                                };
-                                                let mut chain = chain.lock().await;
-                                                if valid_block(&chain, &block) {
-                                                    chain.add_block(block);
+                                                        })),
+                                                    };
+                                                    let _ = write_msg(&mut socket, &msg).await;
+                                                }
+                                                coin_proto::proto::node_message::Msg::Chain(c) => {
+                                                    let blocks: Vec<Block> = c
+                                                        .blocks
+                                                        .into_iter()
+                                                        .filter_map(|pb| {
+                                                            pb.header.map(|h| Block {
+                                                                header: BlockHeader {
+                                                                    previous_hash: h.previous_hash,
+                                                                    merkle_root: h.merkle_root,
+                                                                    timestamp: h.timestamp,
+                                                                    nonce: h.nonce,
+                                                                    difficulty: h.difficulty,
+                                                                },
+                                                                transactions: pb.transactions,
+                                                            })
+                                                        })
+                                                        .collect();
+                                                    chain.lock().await.replace(blocks);
+                                                }
+                                                coin_proto::proto::node_message::Msg::Block(b) => {
+                                                    if let Some(h) = b.header {
+                                                        let block = Block {
+                                                            header: BlockHeader {
+                                                                previous_hash: h.previous_hash,
+                                                                merkle_root: h.merkle_root,
+                                                                timestamp: h.timestamp,
+                                                                nonce: h.nonce,
+                                                                difficulty: h.difficulty,
+                                                            },
+                                                            transactions: b.transactions,
+                                                        };
+                                                        let mut chain = chain.lock().await;
+                                                        if valid_block(&chain, &block) {
+                                                            chain.add_block(block);
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                    },
+                                    }
                                     Err(_) => break,
                                 }
                             }
@@ -419,6 +409,7 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use coin::coinbase_transaction;
     use coin_wallet::Wallet;
     use hex_literal::hex;
     use std::net::SocketAddr;
@@ -440,6 +431,19 @@ mod tests {
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
         let addr = addrs[0];
+        {
+            let mut chain = node.chain.lock().await;
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![coinbase_transaction(A1.clone())],
+            });
+        }
         node.connect(addr).await.unwrap();
         sleep(Duration::from_millis(200)).await;
         let peers = node.peers().await;
@@ -673,6 +677,16 @@ mod tests {
         let (_addrs, _rx) = node.start().await.unwrap();
         {
             let mut chain = node.chain.lock().await;
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![coinbase_transaction(A1)],
+            });
             let mut tx = Transaction {
                 sender: A1.into(),
                 recipient: A2.into(),
@@ -683,6 +697,6 @@ mod tests {
             chain.add_transaction(tx);
         }
         sleep(Duration::from_millis(200)).await;
-        assert_eq!(node.chain_len().await, 1);
+        assert_eq!(node.chain_len().await, 2);
     }
 }

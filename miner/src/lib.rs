@@ -1,4 +1,4 @@
-use coin::{Block, Blockchain, TransactionExt, coinbase_transaction};
+use coin::{Block, BlockHeader, Blockchain, TransactionExt, coinbase_transaction};
 use sha2::{Digest, Sha256};
 
 fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
@@ -70,6 +70,16 @@ mod tests {
     #[test]
     fn mining_adds_block() {
         let mut bc = Blockchain::new();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1)],
+        });
         let mut tx = new_transaction(A1, A2, 1);
         sign_a1(&mut tx);
         assert!(bc.add_transaction(tx));
