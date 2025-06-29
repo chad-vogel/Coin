@@ -134,4 +134,12 @@ mod tests {
         assert_eq!(addr0, ADDR_0H_0_0);
         assert_eq!(addr1, ADDR_0H_0_1);
     }
+
+    #[test]
+    fn generate_wallet() {
+        let wallet = Wallet::generate("").unwrap();
+        let phrase = wallet.mnemonic().unwrap().phrase();
+        assert_eq!(phrase.split_whitespace().count(), 24);
+        assert!(wallet.master_xprv_string().starts_with("xprv"));
+    }
 }

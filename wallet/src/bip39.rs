@@ -61,3 +61,35 @@ impl Mnemonic {
 }
 
 const WORDLIST: [&str; 2048] = include!("wordlist.in");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::rngs::mock::StepRng;
+
+    #[test]
+    fn random_produces_expected_phrase() {
+        // StepRng with zero increment yields the same value on each call
+        let mut rng = StepRng::new(1, 0);
+        let m = Mnemonic::random(&mut rng, Language::English);
+        let expected_word = WORDLIST[1];
+        let expected = std::iter::repeat(expected_word)
+            .take(24)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(m.phrase(), expected);
+    }
+
+    #[test]
+    fn phrase_returns_input() {
+        let phrase = "abandon ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability ability art";
+        let m = Mnemonic::new(phrase, Language::English).unwrap();
+        assert_eq!(m.phrase(), phrase);
+    }
+
+    #[test]
+    fn invalid_word_fails() {
+        let res = Mnemonic::new("abandon foobar", Language::English);
+        assert!(matches!(res, Err(Error::InvalidWord(ref w)) if w == "foobar"));
+    }
+}
