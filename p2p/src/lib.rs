@@ -1,3 +1,4 @@
+use clap::ValueEnum;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
 use hex;
@@ -38,7 +39,7 @@ async fn read_with_timeout(socket: &mut TcpStream) -> bool {
         .is_ok()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum NodeType {
     Wallet,
     Miner,

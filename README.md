@@ -37,11 +37,14 @@ The `coin-p2p` crate provides a simple command line interface. A miner can be
 started with:
 
 ```bash
-cargo run -p coin-p2p -- <port> miner
+cargo run -p coin-p2p -- --port <PORT> --node-type miner
 ```
+Replace `<PORT>` with the TCP port to listen on. Additional nodes can be run as
+`wallet` or `verifier` types using the same command structure:
 
-Replace `<port>` with the TCP port to listen on. Additional nodes can be run as
-`wallet` or `verifier` types using the same command structure.
+```bash
+cargo run -p coin-p2p -- --port 9000 --node-type wallet
+```
 
 ## Wallet Basics
 

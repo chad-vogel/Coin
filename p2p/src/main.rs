@@ -5,8 +5,10 @@ use coin_p2p::{Node, NodeType};
 
 #[derive(Parser)]
 struct Args {
+    #[arg(long)]
     port: u16,
-    role: String,
+    #[arg(long, value_enum)]
+    node_type: NodeType,
     #[arg(long, default_value = "chain.bin")]
     chain_file: String,
 }
@@ -15,13 +17,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let kind = match args.role.as_str() {
-        "wallet" => NodeType::Wallet,
-        "miner" => NodeType::Miner,
-        "verifier" => NodeType::Verifier,
-        _ => NodeType::Wallet,
-    };
-    let node = Node::new(args.port, kind);
+    let node = Node::new(args.port, args.node_type);
     if let Ok(chain) = Blockchain::load(&args.chain_file) {
         *node.chain_handle().lock().await = chain;
     }
