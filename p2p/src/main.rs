@@ -20,6 +20,8 @@ async fn main() -> Result<()> {
         Some(cfg.min_peers),
         cfg.wallet_address.clone(),
         Some(cfg.peers_file.clone()),
+        Some(cfg.network_id.clone()),
+        Some(cfg.protocol_version),
     );
     if let Ok(chain) = Blockchain::load(&cfg.chain_file) {
         *node.chain_handle().lock().await = chain;

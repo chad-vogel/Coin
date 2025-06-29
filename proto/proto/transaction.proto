@@ -39,6 +39,11 @@ message Block {
   repeated Transaction transactions = 2;
 }
 
+message Handshake {
+  string network_id = 1;
+  uint32 version = 2;
+}
+
 message NodeMessage {
   oneof msg {
     Transaction transaction = 1;
@@ -49,5 +54,6 @@ message NodeMessage {
     GetChain get_chain = 6;
     Chain chain = 7;
     Block block = 8;
+    Handshake handshake = 9;
   }
 }
