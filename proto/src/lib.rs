@@ -14,6 +14,7 @@ mod tests {
             recipient: "bob".into(),
             amount: 10,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         let mut buf = Vec::new();
         tx.encode(&mut buf).unwrap();
@@ -37,6 +38,7 @@ mod tests {
                 recipient: "bob".into(),
                 amount: 10,
                 signature: Vec::new(),
+                encrypted_message: Vec::new(),
             }],
         };
         let mut buf = Vec::new();

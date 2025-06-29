@@ -460,6 +460,7 @@ mod tests {
             recipient: A2.into(),
             amount: 1,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         send_transaction(&addr.to_string(), &tx).await.unwrap();
@@ -509,6 +510,7 @@ mod tests {
                 recipient: A2.into(),
                 amount: 2,
                 signature: Vec::new(),
+                encrypted_message: Vec::new(),
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
@@ -537,6 +539,7 @@ mod tests {
             recipient: A2.into(),
             amount: 3,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let block = coin_proto::proto::Block {
@@ -569,6 +572,7 @@ mod tests {
             recipient: A2.into(),
             amount: 1,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let mut h = Sha256::new();
@@ -611,6 +615,7 @@ mod tests {
             recipient: A2.into(),
             amount: 2,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let mut h = Sha256::new();
@@ -644,6 +649,7 @@ mod tests {
             recipient: A2.into(),
             amount: 1,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx0);
         chain.add_transaction(tx0);
@@ -655,6 +661,7 @@ mod tests {
             recipient: A1.into(),
             amount: 2,
             signature: Vec::new(),
+            encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
         let mut h = Sha256::new();
@@ -699,6 +706,7 @@ mod tests {
                 recipient: A2.into(),
                 amount: 1,
                 signature: Vec::new(),
+                encrypted_message: Vec::new(),
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);

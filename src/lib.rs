@@ -26,6 +26,7 @@ pub fn new_transaction(
         recipient: recipient.into(),
         amount,
         signature: Vec::new(),
+        encrypted_message: Vec::new(),
     }
 }
 
@@ -36,6 +37,49 @@ pub fn coinbase_transaction(miner: impl Into<String>) -> Transaction {
         recipient: miner.into(),
         amount: BLOCK_SUBSIDY,
         signature: Vec::new(),
+        encrypted_message: Vec::new(),
+    }
+}
+
+pub fn encrypt_message(msg: &str, sk: &secp256k1::SecretKey, pk: &secp256k1::PublicKey) -> Vec<u8> {
+    let secret = secp256k1::ecdh::SharedSecret::new(pk, sk);
+    let key = Sha256::digest(secret.as_ref());
+    msg.as_bytes()
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ key[i % key.len()])
+        .collect()
+}
+
+pub fn decrypt_message(
+    data: &[u8],
+    sk: &secp256k1::SecretKey,
+    pk: &secp256k1::PublicKey,
+) -> Option<String> {
+    let secret = secp256k1::ecdh::SharedSecret::new(pk, sk);
+    let key = Sha256::digest(secret.as_ref());
+    let bytes: Vec<u8> = data
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ key[i % key.len()])
+        .collect();
+    String::from_utf8(bytes).ok()
+}
+
+pub fn new_transaction_with_message(
+    sender: impl Into<String>,
+    recipient: impl Into<String>,
+    amount: u64,
+    message: &str,
+    sender_sk: &secp256k1::SecretKey,
+    recipient_pk: &secp256k1::PublicKey,
+) -> Transaction {
+    Transaction {
+        sender: sender.into(),
+        recipient: recipient.into(),
+        amount,
+        signature: Vec::new(),
+        encrypted_message: encrypt_message(message, sender_sk, recipient_pk),
     }
 }
 
@@ -68,6 +112,7 @@ impl TransactionExt for Transaction {
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
         hasher.update(self.amount.to_be_bytes());
+        hasher.update(&self.encrypted_message);
         let result = hasher.finalize();
         hex::encode(result)
     }
@@ -545,5 +590,30 @@ mod tests {
         let mut tx = new_transaction(A1, A2, 5);
         tx.signature = sig;
         assert!(!tx.verify());
+    }
+
+    #[test]
+    fn encrypt_and_decrypt_message() {
+        let secp = secp256k1::Secp256k1::new();
+        let sk_sender = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk_recipient = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let pk_sender = secp256k1::PublicKey::from_secret_key(&secp, &sk_sender);
+        let pk_recipient = secp256k1::PublicKey::from_secret_key(&secp, &sk_recipient);
+        let msg = "hello";
+        let encrypted = encrypt_message(msg, &sk_sender, &pk_recipient);
+        let decrypted = decrypt_message(&encrypted, &sk_recipient, &pk_sender).unwrap();
+        assert_eq!(decrypted, msg);
+    }
+
+    #[test]
+    fn new_transaction_with_message_encryption() {
+        let secp = secp256k1::Secp256k1::new();
+        let sk_sender = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let pk_recipient = secp256k1::PublicKey::from_secret_key(
+            &secp,
+            &secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap(),
+        );
+        let tx = new_transaction_with_message(A1, A2, 5, "secret", &sk_sender, &pk_recipient);
+        assert!(!tx.encrypted_message.is_empty());
     }
 }
