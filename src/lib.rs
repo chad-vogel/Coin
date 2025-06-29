@@ -382,6 +382,35 @@ impl Blockchain {
         self.difficulty
     }
 
+    pub fn validate_chain(blocks: &[Block]) -> bool {
+        for (i, block) in blocks.iter().enumerate() {
+            if i > 0 && block.header.previous_hash != blocks[i - 1].hash() {
+                return false;
+            }
+
+            let mut hasher = Sha256::new();
+            for tx in &block.transactions {
+                if !tx.sender.is_empty() && !tx.verify() {
+                    return false;
+                }
+                hasher.update(tx.hash());
+            }
+            let merkle = hex::encode(hasher.finalize());
+            if merkle != block.header.merkle_root {
+                return false;
+            }
+
+            if let Ok(hash) = hex::decode(block.hash()) {
+                if !meets_difficulty(&hash, block.header.difficulty) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
     pub fn replace(&mut self, new_chain: Vec<Block>) {
         if new_chain.len() > self.chain.len() {
             self.chain = new_chain;
@@ -404,11 +433,20 @@ impl Blockchain {
     pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let f = File::open(path)?;
         let chain_msg: coin_proto::Chain = serde_json::from_reader(f).unwrap();
+        let blocks: Vec<Block> = chain_msg
+            .blocks
+            .into_iter()
+            .filter_map(Block::from_rpc)
+            .collect();
+        if !Self::validate_chain(&blocks) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid chain",
+            ));
+        }
         let mut bc = Blockchain::new();
-        for pb in chain_msg.blocks {
-            if let Some(block) = Block::from_rpc(pb) {
-                bc.add_block(block);
-            }
+        for block in blocks {
+            bc.add_block(block);
         }
         Ok(bc)
     }
@@ -532,16 +570,20 @@ mod tests {
     fn balance_reflects_coinbase() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.balance(A1), 0);
-        bc.add_block(Block {
+        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
-                merkle_root: String::new(),
+                merkle_root: hex::encode(h.finalize()),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
-        });
+            transactions: vec![tx],
+        };
+        bc.add_block(block);
         assert_eq!(bc.balance(A1), bc.block_subsidy() as i64);
     }
 
@@ -613,21 +655,53 @@ mod tests {
     #[test]
     fn save_and_load_chain() {
         let mut bc = Blockchain::new();
-        bc.add_block(Block {
+        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let block = Block {
             header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: hex::encode(h.finalize()),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        };
+        bc.add_block(block);
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        bc.save(tmp.path()).unwrap();
+        let loaded = Blockchain::load(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), bc.len());
+        assert_eq!(loaded.last_block_hash(), bc.last_block_hash());
+    }
+
+    #[test]
+    fn load_rejects_invalid_chain() {
+        let block = coin_proto::Block {
+            header: coin_proto::BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
-        });
+            transactions: vec![coin_proto::Transaction {
+                sender: A1.into(),
+                recipient: A2.into(),
+                amount: 1,
+                fee: 0,
+                signature: Vec::new(),
+                encrypted_message: Vec::new(),
+            }],
+        };
+        let chain = coin_proto::Chain {
+            blocks: vec![block],
+        };
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        bc.save(tmp.path()).unwrap();
-        let loaded = Blockchain::load(tmp.path()).unwrap();
-        assert_eq!(loaded.len(), bc.len());
-        assert_eq!(loaded.last_block_hash(), bc.last_block_hash());
+        serde_json::to_writer(File::create(tmp.path()).unwrap(), &chain).unwrap();
+        let res = Blockchain::load(tmp.path());
+        assert!(res.is_err());
     }
 
     fn address_from_secret(sk: &secp256k1::SecretKey) -> String {
