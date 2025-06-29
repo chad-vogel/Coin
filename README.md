@@ -17,16 +17,17 @@ calculating block hashes.
 
 ## Mining Protocol
 
-Mining repeatedly hashes a candidate block while incrementing the `nonce`
-until the SHA256 digest contains the required number of leading zero bytes.
-Miners insert a coinbase transaction paying `BLOCK_SUBSIDY` to themselves
-before starting the search. Once a valid block is found it is broadcast to
-peers and appended to the local chain.
+Mining starts with a candidate block created from all pending transactions.
+Miners add a coinbase transaction paying `BLOCK_SUBSIDY` to themselves and
+then repeatedly hash the block header while incrementing the `nonce` until the
+SHA256 digest has the required number of leading zero bytes, defined by the
+`difficulty` field. Once a valid block is produced it is broadcast to peers and
+appended to the local chain.
 
 ### Difficulty Adjustment
 
 `DIFFICULTY_WINDOW` recent blocks are examined each time a new block is added.
-If the average time between them is less than `TARGET_BLOCK_TIME` the
+If the average spacing between them is less than `TARGET_BLOCK_TIME` the
 difficulty is increased; if it is greater, the difficulty decreases. This keeps
 block production close to the target interval.
 
