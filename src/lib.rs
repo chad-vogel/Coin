@@ -1,6 +1,10 @@
 use bs58;
 pub use coin_proto::proto::Transaction;
+use prost::Message;
 use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Number of blocks used for difficulty adjustment
@@ -91,6 +95,32 @@ impl Block {
             hasher.update(tx.hash());
         }
         hex::encode(hasher.finalize())
+    }
+
+    pub fn to_proto(&self) -> coin_proto::proto::Block {
+        coin_proto::proto::Block {
+            header: Some(coin_proto::proto::BlockHeader {
+                previous_hash: self.header.previous_hash.clone(),
+                merkle_root: self.header.merkle_root.clone(),
+                timestamp: self.header.timestamp,
+                nonce: self.header.nonce,
+                difficulty: self.header.difficulty,
+            }),
+            transactions: self.transactions.clone(),
+        }
+    }
+
+    pub fn from_proto(pb: coin_proto::proto::Block) -> Option<Self> {
+        pb.header.map(|h| Block {
+            header: BlockHeader {
+                previous_hash: h.previous_hash,
+                merkle_root: h.merkle_root,
+                timestamp: h.timestamp,
+                nonce: h.nonce,
+                difficulty: h.difficulty,
+            },
+            transactions: pb.transactions,
+        })
     }
 }
 
@@ -190,6 +220,30 @@ impl Blockchain {
 
     pub fn all(&self) -> Vec<Block> {
         self.chain.clone()
+    }
+
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let chain = coin_proto::proto::Chain {
+            blocks: self.chain.iter().map(|b| b.to_proto()).collect(),
+        };
+        let mut buf = Vec::new();
+        chain.encode(&mut buf).unwrap();
+        let mut f = File::create(path)?;
+        f.write_all(&buf)
+    }
+
+    pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+        let mut buf = Vec::new();
+        let mut f = File::open(path)?;
+        f.read_to_end(&mut buf)?;
+        let chain_msg = coin_proto::proto::Chain::decode(&buf[..]).unwrap();
+        let mut bc = Blockchain::new();
+        for pb in chain_msg.blocks {
+            if let Some(block) = Block::from_proto(pb) {
+                bc.add_block(block);
+            }
+        }
+        Ok(bc)
     }
 
     /// Calculate the balance for `addr` by scanning the chain
@@ -310,5 +364,25 @@ mod tests {
         let tx = new_transaction("badaddr", A2, 1);
         assert!(!bc.add_transaction(tx));
         assert_eq!(bc.mempool_len(), 0);
+    }
+
+    #[test]
+    fn save_and_load_chain() {
+        let mut bc = Blockchain::new();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1)],
+        });
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        bc.save(tmp.path()).unwrap();
+        let loaded = Blockchain::load(tmp.path()).unwrap();
+        assert_eq!(loaded.len(), bc.len());
+        assert_eq!(loaded.last_block_hash(), bc.last_block_hash());
     }
 }
