@@ -49,6 +49,9 @@ mod tests {
     use super::*;
     use coin::new_transaction;
 
+    const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
+    const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
+
     #[test]
     fn difficulty_check() {
         assert!(meets_difficulty(&[0, 0, 1], 2));
@@ -58,10 +61,10 @@ mod tests {
     #[test]
     fn mining_adds_block() {
         let mut bc = Blockchain::new();
-        bc.add_transaction(new_transaction("a", "b", 1));
+        assert!(bc.add_transaction(new_transaction(A1, A2, 1)));
         let len_before = bc.len();
         let difficulty = bc.difficulty();
-        let block = mine_block(&mut bc, "miner");
+        let block = mine_block(&mut bc, A1);
         assert!(bc.len() > len_before);
         let hash = hex::decode(block.hash()).unwrap();
         assert!(meets_difficulty(&hash, difficulty));
@@ -70,10 +73,10 @@ mod tests {
     #[test]
     fn mining_rewards_miner() {
         let mut bc = Blockchain::new();
-        assert_eq!(bc.balance("miner"), 0);
-        mine_block(&mut bc, "miner");
-        assert_eq!(bc.balance("miner"), coin::BLOCK_SUBSIDY as i64);
-        mine_block(&mut bc, "miner");
-        assert_eq!(bc.balance("miner"), (coin::BLOCK_SUBSIDY * 2) as i64);
+        assert_eq!(bc.balance(A1), 0);
+        mine_block(&mut bc, A1);
+        assert_eq!(bc.balance(A1), coin::BLOCK_SUBSIDY as i64);
+        mine_block(&mut bc, A1);
+        assert_eq!(bc.balance(A1), (coin::BLOCK_SUBSIDY * 2) as i64);
     }
 }

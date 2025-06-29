@@ -10,3 +10,4 @@ edition = "2024"
 sha2 = "0.10"
 hex = "0.4"
 coin-proto = { path = "proto" }
+bs58 = "0.5"
