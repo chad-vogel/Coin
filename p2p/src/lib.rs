@@ -128,6 +128,10 @@ impl Node {
         }
     }
 
+    pub fn chain_handle(&self) -> Arc<Mutex<Blockchain>> {
+        self.chain.clone()
+    }
+
     #[allow(dead_code)]
     pub fn with_interval(port: u16, interval: Duration, node_type: NodeType) -> Self {
         Self {

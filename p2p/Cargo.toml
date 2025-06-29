@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 coin-proto = { path = "../proto" }
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
 prost = "0.12"
 coin = { path = ".." }
 sha2 = "0.10"
 hex = "0.4"
 miner = { path = "../miner" }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
