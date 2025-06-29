@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use coin::Blockchain;
 use coin_p2p::{Node, NodeType, config::Config};
+use std::io::{self, Write};
+use tokio::time::{Duration, sleep};
 
 #[derive(Parser)]
 struct Args {
@@ -28,11 +30,27 @@ async fn main() -> Result<()> {
     if let Ok(chain) = Blockchain::load(&cfg.chain_file) {
         *node.chain_handle().lock().await = chain;
     }
-    let (_addrs, _rx) = node.start().await?;
+    let (addrs, _rx) = node.start().await?;
+    println!("Node running as {:?} on {:?}", node.node_type(), addrs);
+
+    let status_node = node.clone();
+    tokio::spawn(async move {
+        loop {
+            let (p, h, m) = status_node.status().await;
+            print!("\rPeers: {} | Height: {} | Mempool: {}    ", p, h, m);
+            io::stdout().flush().ok();
+            sleep(Duration::from_secs(1)).await;
+            if !status_node.is_running() {
+                break;
+            }
+        }
+    });
+
     for peer in cfg.seed_peer_addrs() {
         let _ = node.connect(peer).await;
     }
     tokio::signal::ctrl_c().await?;
+    node.shutdown();
     let handle = node.chain_handle();
     let chain = handle.lock().await;
     chain.save(&cfg.chain_file)?;
