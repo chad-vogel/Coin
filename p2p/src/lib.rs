@@ -10,7 +10,10 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, mpsc};
@@ -151,6 +154,7 @@ async fn broadcast_block_internal(
 }
 
 /// Simple P2P node maintaining a peer address list and pinging peers
+#[derive(Clone)]
 pub struct Node {
     listeners: Vec<SocketAddr>,
     peers: Arc<Mutex<HashSet<SocketAddr>>>,
@@ -165,6 +169,7 @@ pub struct Node {
     protocol_version: u32,
     max_msgs_per_sec: u32,
     max_peers: usize,
+    running: Arc<AtomicBool>,
 }
 
 impl Node {
@@ -193,6 +198,7 @@ impl Node {
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
             max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
+            running: Arc::new(AtomicBool::new(true)),
         }
     }
 
@@ -227,11 +233,28 @@ impl Node {
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
             max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
+            running: Arc::new(AtomicBool::new(true)),
         }
     }
 
     pub fn node_type(&self) -> NodeType {
         self.node_type
+    }
+
+    pub fn shutdown(&self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+
+    pub async fn status(&self) -> (usize, usize, usize) {
+        let peers = self.peers.lock().await.len();
+        let chain = self.chain.lock().await;
+        let chain_len = chain.len();
+        let mem_len = chain.mempool_len();
+        (peers, chain_len, mem_len)
     }
 
     async fn load_peers(&self) {
@@ -264,6 +287,7 @@ impl Node {
 
     /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
     pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
+        self.running.store(true, Ordering::SeqCst);
         self.load_peers().await;
 
         let mut listeners = Vec::new();
@@ -291,8 +315,12 @@ impl Node {
             let ver = protocol_version;
             let max = max;
             let cap = max_peers;
+            let running = self.running.clone();
             tokio::spawn(async move {
                 loop {
+                    if !running.load(Ordering::SeqCst) {
+                        break;
+                    }
                     if let Ok((mut socket, _addr)) = listener.accept().await {
                         if peers.lock().await.len() >= cap {
                             continue;
@@ -304,7 +332,11 @@ impl Node {
                         let nid = nid.clone();
                         let ver = ver;
                         let max = max;
+                        let running = running.clone();
                         tokio::spawn(async move {
+                            if !running.load(Ordering::SeqCst) {
+                                return;
+                            }
                             // expect handshake first
                             let msg = match read_msg(&mut socket).await {
                                 Ok(m) => m,
@@ -479,15 +511,23 @@ impl Node {
         let interval = self.ping_interval;
         let nid = self.network_id.clone();
         let ver = self.protocol_version;
+        let running = self.running.clone();
         tokio::spawn(async move {
             loop {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
                 tokio::time::sleep(interval).await;
                 let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
                 for addr in list {
                     let peers = peers.clone();
                     let nid = nid.clone();
                     let ver = ver;
+                    let running = running.clone();
                     tokio::spawn(async move {
+                        if !running.load(Ordering::SeqCst) {
+                            return;
+                        }
                         if let Ok(mut stream) = TcpStream::connect(addr).await {
                             let hs = NodeMessage {
                                 msg: Some(coin_proto::proto::node_message::Msg::Handshake(
@@ -535,8 +575,12 @@ impl Node {
                 .unwrap_or_else(|| "miner".to_string());
             let nid = self.network_id.clone();
             let ver = self.protocol_version;
+            let running = self.running.clone();
             tokio::spawn(async move {
                 loop {
+                    if !running.load(Ordering::SeqCst) {
+                        break;
+                    }
                     while peers.lock().await.len() < min {
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
