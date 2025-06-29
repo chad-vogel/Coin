@@ -16,7 +16,8 @@ use tokio::time::{Duration, timeout};
 /// Send a length-prefixed protobuf message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
     let mut buf = Vec::new();
-    msg.encode(&mut buf).unwrap();
+    msg.encode(&mut buf)
+        .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?;
     let len = (buf.len() as u32).to_be_bytes();
     socket.write_all(&len).await?;
     socket.write_all(&buf).await?;
@@ -30,13 +31,16 @@ async fn read_msg(socket: &mut TcpStream) -> tokio::io::Result<NodeMessage> {
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut buf = vec![0u8; len];
     socket.read_exact(&mut buf).await?;
-    Ok(NodeMessage::decode(&buf[..]).unwrap())
+    Ok(NodeMessage::decode(&buf[..])
+        .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?)
 }
 
-async fn read_with_timeout(socket: &mut TcpStream) -> bool {
-    timeout(Duration::from_secs(3), read_msg(socket))
-        .await
-        .is_ok()
+async fn read_with_timeout(socket: &mut TcpStream) -> tokio::io::Result<bool> {
+    match timeout(Duration::from_secs(3), read_msg(socket)).await {
+        Ok(Ok(_)) => Ok(true),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Ok(false),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -303,8 +307,10 @@ impl Node {
                                 msg: Some(coin_proto::proto::node_message::Msg::Ping(Ping {})),
                             };
                             if write_msg(&mut stream, &ping).await.is_ok() {
-                                if read_with_timeout(&mut stream).await {
-                                    return;
+                                match read_with_timeout(&mut stream).await {
+                                    Ok(true) => return,
+                                    Ok(false) => (),
+                                    Err(_) => (),
                                 }
                             }
                         }
