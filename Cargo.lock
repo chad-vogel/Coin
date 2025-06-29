@@ -190,6 +190,8 @@ dependencies = [
  "coin-proto",
  "hex",
  "prost",
+ "ripemd",
+ "secp256k1",
  "sha2",
  "tempfile",
 ]
@@ -202,7 +204,9 @@ dependencies = [
  "clap",
  "coin",
  "coin-proto",
+ "coin-wallet",
  "hex",
+ "hex-literal",
  "miner",
  "prost",
  "sha2",
@@ -430,7 +434,9 @@ name = "miner"
 version = "0.1.0"
 dependencies = [
  "coin",
+ "coin-wallet",
  "hex",
+ "hex-literal",
  "sha2",
 ]
 

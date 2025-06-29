@@ -13,6 +13,7 @@ mod tests {
             sender: "alice".into(),
             recipient: "bob".into(),
             amount: 10,
+            signature: Vec::new(),
         };
         let mut buf = Vec::new();
         tx.encode(&mut buf).unwrap();
@@ -35,6 +36,7 @@ mod tests {
                 sender: "alice".into(),
                 recipient: "bob".into(),
                 amount: 10,
+                signature: Vec::new(),
             }],
         };
         let mut buf = Vec::new();

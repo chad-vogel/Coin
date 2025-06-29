@@ -48,9 +48,18 @@ pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
 mod tests {
     use super::*;
     use coin::new_transaction;
+    use coin_wallet::Wallet;
+    use hex_literal::hex;
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
     const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
+    const SEED: [u8; 16] = hex!("000102030405060708090a0b0c0d0e0f");
+
+    fn sign_a1(tx: &mut coin::Transaction) {
+        let wallet = Wallet::from_seed(&SEED).unwrap();
+        let sk = wallet.derive_priv("m/0'/0/0").unwrap().secret_key().clone();
+        tx.sign(&sk);
+    }
 
     #[test]
     fn difficulty_check() {
@@ -61,7 +70,9 @@ mod tests {
     #[test]
     fn mining_adds_block() {
         let mut bc = Blockchain::new();
-        assert!(bc.add_transaction(new_transaction(A1, A2, 1)));
+        let mut tx = new_transaction(A1, A2, 1);
+        sign_a1(&mut tx);
+        assert!(bc.add_transaction(tx));
         let len_before = bc.len();
         let difficulty = bc.difficulty();
         let block = mine_block(&mut bc, A1);
