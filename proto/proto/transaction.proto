@@ -6,6 +6,7 @@ message Transaction {
   string recipient = 2;
   uint64 amount = 3;
   bytes signature = 4;
+  bytes encrypted_message = 5;
 }
 
 message Ping {}
