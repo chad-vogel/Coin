@@ -125,3 +125,8 @@ cargo test
 # Run coverage (fails below 90%)
 cargo tarpaulin --workspace --timeout 60 --fail-under 90
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
