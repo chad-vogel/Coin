@@ -196,6 +196,23 @@ impl Blockchain {
         if (!tx.sender.is_empty() && !valid_address(&tx.sender)) || !valid_address(&tx.recipient) {
             return false;
         }
+        if tx.amount == 0 {
+            return false;
+        }
+        if !tx.sender.is_empty() {
+            let mut bal = self.balance(&tx.sender);
+            for m in &self.mempool {
+                if m.sender == tx.sender && !m.sender.is_empty() {
+                    bal -= m.amount as i64;
+                }
+                if m.recipient == tx.sender {
+                    bal += m.amount as i64;
+                }
+            }
+            if bal < tx.amount as i64 {
+                return false;
+            }
+        }
         self.mempool.push(tx);
         true
     }
@@ -337,6 +354,17 @@ mod tests {
     fn mempool_and_blocks() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.len(), 0);
+        // fund both accounts
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1), coinbase_transaction(A2)],
+        });
         let tx1 = new_transaction(A1, A2, 5);
         let tx2 = new_transaction(A2, A1, 7);
         assert!(bc.add_transaction(tx1.clone()));
@@ -345,7 +373,7 @@ mod tests {
         let block = bc.candidate_block();
         assert_eq!(block.transactions.len(), 2);
         bc.add_block(block.clone());
-        assert_eq!(bc.len(), 1);
+        assert_eq!(bc.len(), 2);
         // mempool cleared
         assert!(bc.mempool.is_empty());
         assert_eq!(bc.last_block_hash().unwrap(), block.hash());
@@ -415,6 +443,31 @@ mod tests {
         let tx = new_transaction("badaddr", A2, 1);
         assert!(!bc.add_transaction(tx));
         assert_eq!(bc.mempool_len(), 0);
+    }
+
+    #[test]
+    fn reject_zero_amount_transaction() {
+        let mut bc = Blockchain::new();
+        let tx = new_transaction(A1, A2, 0);
+        assert!(!bc.add_transaction(tx));
+    }
+
+    #[test]
+    fn reject_insufficient_balance() {
+        let mut bc = Blockchain::new();
+        // give A1 some coins
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1)],
+        });
+        let tx = new_transaction(A1, A2, BLOCK_SUBSIDY + 1);
+        assert!(!bc.add_transaction(tx));
     }
 
     #[test]
