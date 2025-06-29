@@ -1,0 +1,17 @@
+# Example configuration for coin-p2p
+listeners:
+  - ip: "0.0.0.0"
+    port: 9000
+# Optional wallet address to receive mining rewards
+wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
+# Node type: Wallet, Miner or Verifier
+node_type: Miner
+# Minimum number of peers required before starting mining
+min_peers: 1
+# Where the blockchain is stored on disk
+chain_file: "chain.bin"
+# List of peers to connect to on startup
+seed_peers:
+  - "127.0.0.1:9001"
+# File storing discovered peers
+peers_file: "peers.txt"
