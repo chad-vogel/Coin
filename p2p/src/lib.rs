@@ -127,6 +127,7 @@ pub struct Node {
     chain: Arc<Mutex<Blockchain>>,
     min_peers: usize,
     wallet_address: Option<String>,
+    peers_file: Option<String>,
 }
 
 impl Node {
@@ -135,6 +136,7 @@ impl Node {
         node_type: NodeType,
         min_peers: Option<usize>,
         wallet_address: Option<String>,
+        peers_file: Option<String>,
     ) -> Self {
         Self {
             listeners,
@@ -144,6 +146,7 @@ impl Node {
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
+            peers_file,
         }
     }
 
@@ -158,6 +161,7 @@ impl Node {
         node_type: NodeType,
         min_peers: Option<usize>,
         wallet_address: Option<String>,
+        peers_file: Option<String>,
     ) -> Self {
         Self {
             listeners,
@@ -167,6 +171,7 @@ impl Node {
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
+            peers_file,
         }
     }
 
@@ -174,8 +179,38 @@ impl Node {
         self.node_type
     }
 
+    async fn load_peers(&self) {
+        if let Some(path) = &self.peers_file {
+            if let Ok(data) = tokio::fs::read_to_string(path).await {
+                for line in data.lines() {
+                    if let Ok(mut addrs) = line.to_socket_addrs() {
+                        if let Some(addr) = addrs.next() {
+                            self.peers.lock().await.insert(addr);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn save_peers(&self) -> tokio::io::Result<()> {
+        if let Some(path) = &self.peers_file {
+            let list: Vec<String> = self
+                .peers
+                .lock()
+                .await
+                .iter()
+                .map(|a| a.to_string())
+                .collect();
+            tokio::fs::write(path, list.join("\n")).await?;
+        }
+        Ok(())
+    }
+
     /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
     pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
+        self.load_peers().await;
+
         let mut listeners = Vec::new();
         for addr in &self.listeners {
             listeners.push(TcpListener::bind(addr).await?);
@@ -448,6 +483,7 @@ mod tests {
     use coin_wallet::Wallet;
     use hex_literal::hex;
     use std::net::SocketAddr;
+    use tempfile;
     use tokio::time::{Duration, sleep};
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
@@ -466,6 +502,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
+            None,
             None,
             None,
         );
@@ -513,6 +550,7 @@ mod tests {
             NodeType::Wallet,
             None,
             None,
+            None,
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -536,6 +574,7 @@ mod tests {
             NodeType::Wallet,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -550,6 +589,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
         );
@@ -576,6 +616,7 @@ mod tests {
             NodeType::Verifier,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -591,6 +632,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
         );
@@ -630,6 +672,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
+            None,
             None,
             None,
         );
@@ -674,6 +717,7 @@ mod tests {
             NodeType::Verifier,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -682,6 +726,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
         );
@@ -773,6 +818,7 @@ mod tests {
             NodeType::Miner,
             Some(0),
             Some(A1.to_string()),
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         {
@@ -810,6 +856,7 @@ mod tests {
             NodeType::Miner,
             Some(1),
             Some(A1.to_string()),
+            None,
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -845,10 +892,40 @@ mod tests {
             NodeType::Verifier,
             None,
             None,
+            None,
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
         sleep(Duration::from_millis(200)).await;
         assert_eq!(miner.chain_len().await, 2);
+    }
+
+    #[tokio::test]
+    async fn load_and_save_peers() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let file = tmp.path().to_string_lossy().to_string();
+        let node = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Wallet,
+            None,
+            None,
+            Some(file.clone()),
+        );
+        let (_addrs, _rx) = node.start().await.unwrap();
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        node.peers.lock().await.insert(peer);
+        node.save_peers().await.unwrap();
+
+        let node2 = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(50),
+            NodeType::Wallet,
+            None,
+            None,
+            Some(file.clone()),
+        );
+        let (_a2, _r2) = node2.start().await.unwrap();
+        assert!(node2.peers().await.contains(&peer));
     }
 }

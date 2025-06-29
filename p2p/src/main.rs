@@ -19,15 +19,20 @@ async fn main() -> Result<()> {
         cfg.node_type,
         Some(cfg.min_peers),
         cfg.wallet_address.clone(),
+        Some(cfg.peers_file.clone()),
     );
     if let Ok(chain) = Blockchain::load(&cfg.chain_file) {
         *node.chain_handle().lock().await = chain;
     }
     let (_addrs, _rx) = node.start().await?;
+    for peer in cfg.seed_peer_addrs() {
+        let _ = node.connect(peer).await;
+    }
     tokio::signal::ctrl_c().await?;
     let handle = node.chain_handle();
     let chain = handle.lock().await;
     chain.save(&cfg.chain_file)?;
+    node.save_peers().await?;
     Ok(())
 }
 

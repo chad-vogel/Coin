@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::fs::File;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use crate::NodeType;
 
@@ -19,10 +19,18 @@ pub struct Config {
     pub min_peers: usize,
     #[serde(default = "default_chain_file")]
     pub chain_file: String,
+    #[serde(default)]
+    pub seed_peers: Vec<String>,
+    #[serde(default = "default_peers_file")]
+    pub peers_file: String,
 }
 
 fn default_chain_file() -> String {
     "chain.bin".to_string()
+}
+
+fn default_peers_file() -> String {
+    "peers.txt".to_string()
 }
 
 impl Config {
@@ -36,5 +44,33 @@ impl Config {
             .iter()
             .filter_map(|l| format!("{}:{}", l.ip, l.port).parse().ok())
             .collect()
+    }
+
+    pub fn seed_peer_addrs(&self) -> Vec<SocketAddr> {
+        self.seed_peers
+            .iter()
+            .filter_map(|s| s.to_socket_addrs().ok().and_then(|mut a| a.next()))
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_peers_fields() {
+        let yaml = r#"
+listeners:
+  - ip: "0.0.0.0"
+    port: 8000
+node_type: Wallet
+seed_peers:
+  - "127.0.0.1:9000"
+peers_file: "p.txt"
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.seed_peers, vec!["127.0.0.1:9000".to_string()]);
+        assert_eq!(cfg.peers_file, "p.txt");
     }
 }

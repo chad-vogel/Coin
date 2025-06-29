@@ -212,6 +212,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 
