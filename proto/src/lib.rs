@@ -13,6 +13,7 @@ mod tests {
             sender: "alice".into(),
             recipient: "bob".into(),
             amount: 10,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -37,6 +38,7 @@ mod tests {
                 sender: "alice".into(),
                 recipient: "bob".into(),
                 amount: 10,
+                fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
             }],

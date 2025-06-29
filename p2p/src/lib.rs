@@ -523,6 +523,7 @@ mod tests {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -593,6 +594,7 @@ mod tests {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 2,
+                fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
             };
@@ -635,6 +637,7 @@ mod tests {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 3,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -674,6 +677,7 @@ mod tests {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -731,6 +735,7 @@ mod tests {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 2,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -765,6 +770,7 @@ mod tests {
             sender: A1.into(),
             recipient: A2.into(),
             amount: 1,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -777,6 +783,7 @@ mod tests {
             sender: A2.into(),
             recipient: A1.into(),
             amount: 2,
+            fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
         };
@@ -830,6 +837,7 @@ mod tests {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 1,
+                fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
             };
@@ -868,6 +876,7 @@ mod tests {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 1,
+                fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
             };
