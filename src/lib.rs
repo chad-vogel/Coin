@@ -26,18 +26,28 @@ pub const HALVING_INTERVAL: u64 = 200_000;
 /// Maximum number of units that will ever exist
 pub const MAX_SUPPLY: u64 = 20_000_000 * COIN;
 
-pub fn new_transaction(
+pub fn new_transaction_with_fee(
     sender: impl Into<String>,
     recipient: impl Into<String>,
     amount: u64,
+    fee: u64,
 ) -> Transaction {
     Transaction {
         sender: sender.into(),
         recipient: recipient.into(),
         amount,
+        fee,
         signature: Vec::new(),
         encrypted_message: Vec::new(),
     }
+}
+
+pub fn new_transaction(
+    sender: impl Into<String>,
+    recipient: impl Into<String>,
+    amount: u64,
+) -> Transaction {
+    new_transaction_with_fee(sender, recipient, amount, 0)
 }
 
 /// Create a coinbase transaction paying `amount` to `miner`
@@ -46,6 +56,7 @@ pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transactio
         sender: String::new(),
         recipient: miner.into(),
         amount,
+        fee: 0,
         signature: Vec::new(),
         encrypted_message: Vec::new(),
     }
@@ -80,6 +91,7 @@ pub fn new_transaction_with_message(
     sender: impl Into<String>,
     recipient: impl Into<String>,
     amount: u64,
+    fee: u64,
     message: &str,
     sender_sk: &secp256k1::SecretKey,
     recipient_pk: &secp256k1::PublicKey,
@@ -88,6 +100,7 @@ pub fn new_transaction_with_message(
         sender: sender.into(),
         recipient: recipient.into(),
         amount,
+        fee,
         signature: Vec::new(),
         encrypted_message: encrypt_message(message, sender_sk, recipient_pk),
     }
@@ -122,6 +135,7 @@ impl TransactionExt for Transaction {
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
         hasher.update(self.amount.to_be_bytes());
+        hasher.update(self.fee.to_be_bytes());
         hasher.update(&self.encrypted_message);
         let result = hasher.finalize();
         hex::encode(result)
@@ -258,13 +272,13 @@ impl Blockchain {
             let mut bal = self.balance(&tx.sender);
             for m in &self.mempool {
                 if m.sender == tx.sender && !m.sender.is_empty() {
-                    bal -= m.amount as i64;
+                    bal -= (m.amount + m.fee) as i64;
                 }
                 if m.recipient == tx.sender {
                     bal += m.amount as i64;
                 }
             }
-            if bal < tx.amount as i64 {
+            if bal < (tx.amount + tx.fee) as i64 {
                 return false;
             }
         }
@@ -405,7 +419,7 @@ impl Blockchain {
         for block in &self.chain {
             for tx in &block.transactions {
                 if tx.sender == addr && !tx.sender.is_empty() {
-                    bal -= tx.amount as i64;
+                    bal -= (tx.amount + tx.fee) as i64;
                 }
                 if tx.recipient == addr {
                     bal += tx.amount as i64;
@@ -559,6 +573,27 @@ mod tests {
     }
 
     #[test]
+    fn fee_deducts_from_balance() {
+        let mut bc = Blockchain::new();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
+        });
+        let tx = new_transaction_with_fee(A1, A2, 5, 2);
+        assert!(bc.add_transaction(tx.clone()));
+        let block = bc.candidate_block();
+        bc.add_block(block);
+        assert_eq!(bc.balance(A1), bc.block_subsidy() as i64 - 7);
+        assert_eq!(bc.balance(A2), 5);
+    }
+
+    #[test]
     fn save_and_load_chain() {
         let mut bc = Blockchain::new();
         bc.add_block(Block {
@@ -656,7 +691,7 @@ mod tests {
             &secp,
             &secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap(),
         );
-        let tx = new_transaction_with_message(A1, A2, 5, "secret", &sk_sender, &pk_recipient);
+        let tx = new_transaction_with_message(A1, A2, 5, 0, "secret", &sk_sender, &pk_recipient);
         assert!(!tx.encrypted_message.is_empty());
     }
 }

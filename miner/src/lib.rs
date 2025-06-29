@@ -1,11 +1,13 @@
 use coin::meets_difficulty;
+use coin::new_transaction_with_fee;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt, coinbase_transaction};
 use sha2::{Digest, Sha256};
 
 pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     let difficulty = chain.difficulty();
     let mut block = chain.candidate_block();
-    let reward = chain.block_subsidy();
+    let fee_total: u64 = block.transactions.iter().map(|t| t.fee).sum();
+    let reward = chain.block_subsidy() + fee_total;
     block
         .transactions
         .insert(0, coinbase_transaction(miner.to_string(), reward));
@@ -92,5 +94,28 @@ mod tests {
         assert_eq!(bc.balance(A1), bc.block_subsidy() as i64);
         mine_block(&mut bc, A1);
         assert_eq!(bc.balance(A1), (bc.block_subsidy() * 2) as i64);
+    }
+
+    #[test]
+    fn miner_collects_fees() {
+        let mut bc = Blockchain::new();
+        let reward1 = bc.block_subsidy();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(A1, reward1)],
+        });
+        let mut tx = new_transaction_with_fee(A1, A2, 1, 2);
+        sign_a1(&mut tx);
+        assert!(bc.add_transaction(tx));
+        let reward2 = bc.block_subsidy();
+        mine_block(&mut bc, A1);
+        assert_eq!(bc.balance(A1), (reward1 + reward2 - 1) as i64);
+        assert_eq!(bc.balance(A2), 1);
     }
 }
