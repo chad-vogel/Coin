@@ -1,6 +1,7 @@
 use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
 use hex;
+use miner::mine_block;
 use prost::Message;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -266,6 +267,50 @@ impl Node {
                 }
             }
         });
+
+        if self.node_type == NodeType::Miner {
+            let peers = self.peers.clone();
+            let chain = self.chain.clone();
+            tokio::spawn(async move {
+                loop {
+                    {
+                        let mut chain = chain.lock().await;
+                        if chain.mempool_len() > 0 {
+                            let block = mine_block(&mut chain, "miner");
+                            let list: Vec<SocketAddr> =
+                                peers.lock().await.iter().copied().collect();
+                            let msg = NodeMessage {
+                                msg: Some(coin_proto::proto::node_message::Msg::Block(
+                                    coin_proto::proto::Block {
+                                        header: Some(coin_proto::proto::BlockHeader {
+                                            previous_hash: block.header.previous_hash.clone(),
+                                            merkle_root: block.header.merkle_root.clone(),
+                                            timestamp: block.header.timestamp,
+                                            nonce: block.header.nonce,
+                                            difficulty: block.header.difficulty,
+                                        }),
+                                        transactions: block.transactions.clone(),
+                                    },
+                                )),
+                            };
+                            for addr in list {
+                                match TcpStream::connect(addr).await {
+                                    Ok(mut stream) => {
+                                        if write_msg(&mut stream, &msg).await.is_err() {
+                                            peers.lock().await.remove(&addr);
+                                        }
+                                    }
+                                    Err(_) => {
+                                        peers.lock().await.remove(&addr);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            });
+        }
 
         Ok((local_addrs, rx))
     }
@@ -576,5 +621,21 @@ mod tests {
         let mut bad = block.clone();
         bad.header.merkle_root = String::new();
         assert!(!valid_block(&chain, &bad));
+    }
+
+    #[tokio::test]
+    async fn miner_mines_pending_tx() {
+        let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Miner);
+        let (_addrs, _rx) = node.start().await.unwrap();
+        {
+            let mut chain = node.chain.lock().await;
+            chain.add_transaction(Transaction {
+                sender: "a".into(),
+                recipient: "b".into(),
+                amount: 1,
+            });
+        }
+        sleep(Duration::from_millis(200)).await;
+        assert_eq!(node.chain_len().await, 1);
     }
 }

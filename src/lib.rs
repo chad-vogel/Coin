@@ -184,6 +184,10 @@ impl Blockchain {
         }
         bal
     }
+
+    pub fn mempool_len(&self) -> usize {
+        self.mempool.len()
+    }
 }
 
 #[cfg(test)]
