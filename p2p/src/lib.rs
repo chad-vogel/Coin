@@ -5,7 +5,7 @@ use coin_proto::proto::{
     Chain, GetChain, GetPeers, Handshake, NodeMessage, Peers, Ping, Pong, Transaction,
 };
 use hex;
-use miner::mine_block;
+use miner::{mine_block, mine_block_threads};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -169,6 +169,7 @@ pub struct Node {
     protocol_version: u32,
     max_msgs_per_sec: u32,
     max_peers: usize,
+    mining_threads: usize,
     running: Arc<AtomicBool>,
 }
 
@@ -183,6 +184,7 @@ impl Node {
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
         max_peers: Option<usize>,
+        mining_threads: Option<usize>,
     ) -> Self {
         Self {
             listeners,
@@ -198,6 +200,11 @@ impl Node {
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
             max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
+            mining_threads: mining_threads.unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1)
+            }),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -218,6 +225,7 @@ impl Node {
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
         max_peers: Option<usize>,
+        mining_threads: Option<usize>,
     ) -> Self {
         Self {
             listeners,
@@ -233,6 +241,11 @@ impl Node {
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
             max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
+            mining_threads: mining_threads.unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1)
+            }),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -575,6 +588,7 @@ impl Node {
                 .unwrap_or_else(|| "miner".to_string());
             let nid = self.network_id.clone();
             let ver = self.protocol_version;
+            let threads = self.mining_threads;
             let running = self.running.clone();
             tokio::spawn(async move {
                 loop {
@@ -587,7 +601,7 @@ impl Node {
                     {
                         let mut chain = chain.lock().await;
                         if chain.len() == 0 || chain.mempool_len() > 0 {
-                            let block = mine_block(&mut chain, &reward);
+                            let block = mine_block_threads(&mut chain, &reward, threads);
                             broadcast_block_internal(peers.clone(), &block, &nid, ver).await;
                         }
                     }
@@ -764,6 +778,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
@@ -815,6 +830,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -851,6 +867,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -865,6 +882,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -902,6 +920,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -917,6 +936,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -970,6 +990,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1033,6 +1054,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1041,6 +1063,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1145,6 +1168,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = miner.start().await.unwrap();
         sleep(Duration::from_millis(200)).await;
@@ -1159,6 +1183,7 @@ mod tests {
             NodeType::Miner,
             Some(0),
             Some(A1.to_string()),
+            None,
             None,
             None,
             None,
@@ -1207,6 +1232,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -1248,6 +1274,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
@@ -1270,6 +1297,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -1283,6 +1311,7 @@ mod tests {
             None,
             None,
             Some(file.clone()),
+            None,
             None,
             None,
             None,
@@ -1304,6 +1333,7 @@ mod tests {
             Some(1),
             None,
             None,
+            None,
         );
         let (addrs, _) = node_a.start().await.unwrap();
         let addr = addrs[0];
@@ -1315,6 +1345,7 @@ mod tests {
             None,
             Some("net2".into()),
             Some(1),
+            None,
             None,
             None,
         );
@@ -1329,6 +1360,7 @@ mod tests {
             None,
             Some("net1".into()),
             Some(2),
+            None,
             None,
             None,
         );
@@ -1348,6 +1380,7 @@ mod tests {
             None,
             None,
             Some(5),
+            None,
             None,
         );
         let (addrs, _) = node.start().await.unwrap();
@@ -1390,6 +1423,7 @@ mod tests {
             None,
             None,
             Some(1),
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1415,6 +1449,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
