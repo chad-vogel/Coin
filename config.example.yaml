@@ -16,3 +16,4 @@ seed_peers:
 # File storing discovered peers
 peers_file: "peers.txt"
 max_msgs_per_sec: 10
+max_peers: 32

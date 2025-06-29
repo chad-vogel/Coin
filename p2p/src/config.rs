@@ -29,6 +29,8 @@ pub struct Config {
     pub protocol_version: u32,
     #[serde(default = "default_max_msgs_per_sec")]
     pub max_msgs_per_sec: u32,
+    #[serde(default = "default_max_peers")]
+    pub max_peers: usize,
 }
 
 fn default_chain_file() -> String {
@@ -49,6 +51,10 @@ fn default_protocol_version() -> u32 {
 
 fn default_max_msgs_per_sec() -> u32 {
     10
+}
+
+fn default_max_peers() -> usize {
+    32
 }
 
 impl Config {
@@ -93,5 +99,6 @@ peers_file: "p.txt"
         assert_eq!(cfg.network_id, "coin");
         assert_eq!(cfg.protocol_version, 1);
         assert_eq!(cfg.max_msgs_per_sec, 10);
+        assert_eq!(cfg.max_peers, 32);
     }
 }
