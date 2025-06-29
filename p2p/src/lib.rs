@@ -60,7 +60,9 @@ fn valid_block(chain: &Blockchain, block: &Block) -> bool {
     }
     let mut hasher = Sha256::new();
     for tx in &block.transactions {
-        if tx.sender.is_empty() || tx.recipient.is_empty() {
+        if (!tx.sender.is_empty() && !coin::valid_address(&tx.sender))
+            || !coin::valid_address(&tx.recipient)
+        {
             return false;
         }
         hasher.update(tx.hash());
@@ -413,6 +415,9 @@ mod tests {
     use std::net::SocketAddr;
     use tokio::time::{Duration, sleep};
 
+    const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
+    const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
+
     #[tokio::test]
     async fn node_connects_and_pings() {
         let node = Node::with_interval(0, Duration::from_millis(50), NodeType::Wallet);
@@ -424,8 +429,8 @@ mod tests {
         let peers = node.peers().await;
         assert!(peers.iter().any(|p| p.port() == addr.port()));
         let tx = Transaction {
-            sender: "a".into(),
-            recipient: "b".into(),
+            sender: A1.into(),
+            recipient: A2.into(),
             amount: 1,
         };
         send_transaction(&addr.to_string(), &tx).await.unwrap();
@@ -471,8 +476,8 @@ mod tests {
         {
             let mut chain = node_a.chain.lock().await;
             chain.add_transaction(Transaction {
-                sender: "x".into(),
-                recipient: "y".into(),
+                sender: A1.into(),
+                recipient: A2.into(),
                 amount: 2,
             });
             let block = chain.candidate_block();
@@ -504,8 +509,8 @@ mod tests {
                 difficulty: 0,
             }),
             transactions: vec![Transaction {
-                sender: "s".into(),
-                recipient: "r".into(),
+                sender: A1.into(),
+                recipient: A2.into(),
                 amount: 3,
             }],
         };
@@ -525,8 +530,8 @@ mod tests {
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let tx = Transaction {
-            sender: "a".into(),
-            recipient: "b".into(),
+            sender: A1.into(),
+            recipient: A2.into(),
             amount: 1,
         };
         let mut h = Sha256::new();
@@ -565,8 +570,8 @@ mod tests {
         node_a.peers.lock().await.insert(addr_b);
 
         let tx = Transaction {
-            sender: "x".into(),
-            recipient: "y".into(),
+            sender: A1.into(),
+            recipient: A2.into(),
             amount: 2,
         };
         let mut h = Sha256::new();
@@ -596,16 +601,16 @@ mod tests {
     async fn validate_block_logic() {
         let mut chain = Blockchain::new();
         chain.add_transaction(Transaction {
-            sender: "s".into(),
-            recipient: "r".into(),
+            sender: A1.into(),
+            recipient: A2.into(),
             amount: 1,
         });
         let genesis = chain.candidate_block();
         chain.add_block(genesis.clone());
 
         let tx = Transaction {
-            sender: "a".into(),
-            recipient: "b".into(),
+            sender: A2.into(),
+            recipient: A1.into(),
             amount: 2,
         };
         let mut h = Sha256::new();
@@ -636,8 +641,8 @@ mod tests {
         {
             let mut chain = node.chain.lock().await;
             chain.add_transaction(Transaction {
-                sender: "a".into(),
-                recipient: "b".into(),
+                sender: A1.into(),
+                recipient: A2.into(),
                 amount: 1,
             });
         }

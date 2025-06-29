@@ -1,3 +1,4 @@
+use bs58;
 pub use coin_proto::proto::Transaction;
 use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -28,6 +29,23 @@ pub fn coinbase_transaction(miner: impl Into<String>) -> Transaction {
         recipient: miner.into(),
         amount: BLOCK_SUBSIDY,
     }
+}
+
+/// Validate that an address is Base58Check encoded and 34 characters long.
+pub fn valid_address(addr: &str) -> bool {
+    if addr.len() != 34 {
+        return false;
+    }
+    let bytes = match bs58::decode(addr).into_vec() {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    if bytes.len() != 25 || bytes[0] != 0x00 {
+        return false;
+    }
+    let (payload, checksum) = bytes.split_at(21);
+    let check = Sha256::digest(Sha256::digest(payload));
+    checksum == &check[..4]
 }
 
 pub trait TransactionExt {
@@ -91,9 +109,14 @@ impl Blockchain {
         }
     }
 
-    /// Add a transaction to the mempool
-    pub fn add_transaction(&mut self, tx: Transaction) {
+    /// Add a transaction to the mempool if addresses are valid.
+    /// Returns `true` if the transaction was accepted.
+    pub fn add_transaction(&mut self, tx: Transaction) -> bool {
+        if (!tx.sender.is_empty() && !valid_address(&tx.sender)) || !valid_address(&tx.recipient) {
+            return false;
+        }
         self.mempool.push(tx);
+        true
     }
 
     /// Create a block from current mempool transactions without clearing them
@@ -194,9 +217,12 @@ impl Blockchain {
 mod tests {
     use super::*;
 
+    const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
+    const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
+
     #[test]
     fn transaction_hash_consistent() {
-        let tx = new_transaction("alice", "bob", 10);
+        let tx = new_transaction(A1, A2, 10);
         let hash1 = tx.hash();
         let hash2 = tx.hash();
         assert_eq!(hash1, hash2);
@@ -206,10 +232,10 @@ mod tests {
     fn mempool_and_blocks() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.len(), 0);
-        let tx1 = new_transaction("alice", "bob", 5);
-        let tx2 = new_transaction("carol", "dave", 7);
-        bc.add_transaction(tx1.clone());
-        bc.add_transaction(tx2.clone());
+        let tx1 = new_transaction(A1, A2, 5);
+        let tx2 = new_transaction(A2, A1, 7);
+        assert!(bc.add_transaction(tx1.clone()));
+        assert!(bc.add_transaction(tx2.clone()));
         // Candidate block should contain both transactions
         let block = bc.candidate_block();
         assert_eq!(block.transactions.len(), 2);
@@ -264,7 +290,7 @@ mod tests {
     #[test]
     fn balance_reflects_coinbase() {
         let mut bc = Blockchain::new();
-        assert_eq!(bc.balance("miner"), 0);
+        assert_eq!(bc.balance(A1), 0);
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -273,8 +299,16 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction("miner")],
+            transactions: vec![coinbase_transaction(A1)],
         });
-        assert_eq!(bc.balance("miner"), BLOCK_SUBSIDY as i64);
+        assert_eq!(bc.balance(A1), BLOCK_SUBSIDY as i64);
+    }
+
+    #[test]
+    fn reject_invalid_transaction() {
+        let mut bc = Blockchain::new();
+        let tx = new_transaction("badaddr", A2, 1);
+        assert!(!bc.add_transaction(tx));
+        assert_eq!(bc.mempool_len(), 0);
     }
 }
