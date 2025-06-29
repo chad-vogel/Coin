@@ -14,6 +14,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, mpsc};
@@ -24,6 +25,7 @@ pub mod config;
 const DEFAULT_MAX_MSGS_PER_SEC: u32 = 10;
 const DEFAULT_MAX_PEERS: usize = 32;
 const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
+const MAX_TIME_DRIFT_SECS: i64 = 2 * 60 * 60; // 2 hours
 
 /// Send a length-prefixed JSON-RPC message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
@@ -70,6 +72,19 @@ pub enum NodeType {
 fn valid_block(chain: &Blockchain, block: &Block) -> bool {
     if block.header.previous_hash != chain.last_block_hash().unwrap_or_default() {
         return false;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let ts = block.header.timestamp as i64;
+    if (ts - now).abs() > MAX_TIME_DRIFT_SECS {
+        return false;
+    }
+    if let Some(prev) = chain.all().last() {
+        if ts <= prev.header.timestamp as i64 {
+            return false;
+        }
     }
     let mut hasher = Sha256::new();
     for tx in &block.transactions {
@@ -984,11 +999,15 @@ mod tests {
         let mut h = Sha256::new();
         h.update(tx.hash());
         let merkle = hex::encode(h.finalize());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let block_msg = NodeMessage::Block(coin_proto::Block {
             header: coin_proto::BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: merkle,
-                timestamp: 0,
+                timestamp: now,
                 nonce: 0,
                 difficulty: 0,
             },
@@ -1047,11 +1066,15 @@ mod tests {
         let mut h = Sha256::new();
         h.update(tx.hash());
         let merkle = hex::encode(h.finalize());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: merkle,
-                timestamp: 0,
+                timestamp: now,
                 nonce: 0,
                 difficulty: 0,
             },
@@ -1099,7 +1122,7 @@ mod tests {
             header: BlockHeader {
                 previous_hash: genesis.hash(),
                 merkle_root: merkle.clone(),
-                timestamp: 1,
+                timestamp: genesis.header.timestamp + 1,
                 nonce: 0,
                 difficulty: 0,
             },
@@ -1111,6 +1134,83 @@ mod tests {
         let mut bad = block.clone();
         bad.header.merkle_root = String::new();
         assert!(!valid_block(&chain, &bad));
+    }
+
+    #[tokio::test]
+    async fn reject_block_timestamp_future_and_past() {
+        let mut chain = Blockchain::new();
+        chain.add_block(chain.candidate_block());
+
+        let mut tx = Transaction {
+            sender: A2.into(),
+            recipient: A1.into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+        };
+        sign_for("m/0'/0/1", &mut tx);
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let merkle = hex::encode(h.finalize());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let future_block = Block {
+            header: BlockHeader {
+                previous_hash: chain.last_block_hash().unwrap(),
+                merkle_root: merkle.clone(),
+                timestamp: now + (MAX_TIME_DRIFT_SECS as u64) + 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        };
+        assert!(!valid_block(&chain, &future_block));
+
+        let past_block = Block {
+            header: BlockHeader {
+                previous_hash: chain.last_block_hash().unwrap(),
+                merkle_root: merkle.clone(),
+                timestamp: now - (MAX_TIME_DRIFT_SECS as u64) - 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        };
+        assert!(!valid_block(&chain, &past_block));
+    }
+
+    #[tokio::test]
+    async fn reject_block_non_monotonic_timestamp() {
+        let mut chain = Blockchain::new();
+        let genesis = chain.candidate_block();
+        chain.add_block(genesis.clone());
+
+        let mut tx = Transaction {
+            sender: A2.into(),
+            recipient: A1.into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+        };
+        sign_for("m/0'/0/1", &mut tx);
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let merkle = hex::encode(h.finalize());
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: genesis.hash(),
+                merkle_root: merkle,
+                timestamp: genesis.header.timestamp,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        };
+        assert!(!valid_block(&chain, &block));
     }
 
     #[tokio::test]
