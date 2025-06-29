@@ -13,9 +13,10 @@ fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
 pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     let difficulty = chain.difficulty();
     let mut block = chain.candidate_block();
+    let reward = chain.block_subsidy();
     block
         .transactions
-        .insert(0, coinbase_transaction(miner.to_string()));
+        .insert(0, coinbase_transaction(miner.to_string(), reward));
     let mut h = Sha256::new();
     for tx in &block.transactions {
         h.update(tx.hash());
@@ -78,7 +79,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1)],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
         });
         let mut tx = new_transaction(A1, A2, 1);
         sign_a1(&mut tx);
@@ -96,8 +97,8 @@ mod tests {
         let mut bc = Blockchain::new();
         assert_eq!(bc.balance(A1), 0);
         mine_block(&mut bc, A1);
-        assert_eq!(bc.balance(A1), coin::BLOCK_SUBSIDY as i64);
+        assert_eq!(bc.balance(A1), bc.block_subsidy() as i64);
         mine_block(&mut bc, A1);
-        assert_eq!(bc.balance(A1), (coin::BLOCK_SUBSIDY * 2) as i64);
+        assert_eq!(bc.balance(A1), (bc.block_subsidy() * 2) as i64);
     }
 }

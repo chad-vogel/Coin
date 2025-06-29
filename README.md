@@ -2,6 +2,8 @@
 
 This project aims to become a full-fledged coin system built with multiple crates. Protocol buffer definitions live in `coin-proto` and networking utilities live in `coin-p2p`. The main `coin` crate provides core blockchain functionality. Unit tests cover all functionality and code coverage is measured using `cargo tarpaulin`.
 
+Each coin is divisible into 100&nbsp;000&nbsp;000 units allowing for very small transfers.
+
 ## Block Structure
 
 Blocks contain a header and a list of transactions. The header stores:
@@ -18,11 +20,13 @@ calculating block hashes.
 ## Mining Protocol
 
 Mining starts with a candidate block created from all pending transactions.
-Miners add a coinbase transaction paying `BLOCK_SUBSIDY` to themselves and
-then repeatedly hash the block header while incrementing the `nonce` until the
-SHA256 digest has the required number of leading zero bytes, defined by the
-`difficulty` field. Once a valid block is produced it is broadcast to peers and
-appended to the local chain.
+Miners add a coinbase transaction paying the current block subsidy to
+themselves. The subsidy starts at 50 coins and halves every `HALVING_INTERVAL`
+(200,000) blocks until a maximum of 20 million coins have been issued.
+After inserting the coinbase transaction, miners repeatedly hash the block
+header while incrementing the `nonce` until the SHA256 digest has the required
+number of leading zero bytes, defined by the `difficulty` field. Once a valid
+block is produced it is broadcast to peers and appended to the local chain.
 
 ### Difficulty Adjustment
 
