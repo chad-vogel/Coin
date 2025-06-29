@@ -5,5 +5,5 @@
 - Include unit tests for all new functionality. Overall test coverage must stay above 90%, with a target of 95%.
 - Use defensive programming and clear code structure.
 - Organize functionality into separate crates whenever it makes sense.
-- Communication contracts should be defined using Protocol Buffers.
+- Communication contracts should be defined using JSON-RPC.
 - Provide a simple peer-to-peer protocol for node communication.
