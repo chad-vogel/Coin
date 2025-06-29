@@ -42,6 +42,40 @@ cargo run -p coin-p2p -- <port> miner
 Replace `<port>` with the TCP port to listen on. Additional nodes can be run as
 `wallet` or `verifier` types using the same command structure.
 
+## Wallet Basics
+
+The `coin-wallet` crate offers a BIP32 HD wallet implementation.
+Generate a new wallet with a random mnemonic and derive addresses as shown
+below:
+
+```rust
+use coin_wallet::Wallet;
+
+let wallet = Wallet::generate("").unwrap();
+println!("Mnemonic: {}", wallet.mnemonic().unwrap());
+
+let first = wallet.derive_address("m/0'/0/0").unwrap();
+println!("First address: {}", first);
+```
+
+Existing phrases can be imported with `Wallet::from_mnemonic` and private or
+public keys are derived using standard BIP32 paths. Transactions may be signed
+by converting a derived key into a `k256::ecdsa::SigningKey`:
+
+```rust
+use coin_wallet::Wallet;
+use coin::new_transaction;
+use k256::ecdsa::{signature::Signer, SigningKey};
+use sha2::{Digest, Sha256};
+
+let wallet = Wallet::generate("").unwrap();
+let tx = new_transaction("alice", "bob", 5);
+let hash = Sha256::digest(tx.hash().as_bytes());
+let child = wallet.derive_priv("m/0'/0/0").unwrap();
+let signer: SigningKey = (&child).into();
+let sig = signer.sign(&hash);
+```
+
 ## Development
 
 ```bash
@@ -49,6 +83,6 @@ Replace `<port>` with the TCP port to listen on. Additional nodes can be run as
 cargo fmt
 cargo test
 
-# Optional: run coverage
-cargo tarpaulin --timeout 60
+# Run coverage (fails below 90%)
+cargo tarpaulin --workspace --timeout 60 --fail-under 90
 ```
