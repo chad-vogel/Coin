@@ -1,4 +1,8 @@
-use bip32::{DerivationPath, Mnemonic, Prefix, PublicKey, XPrv, XPub};
+mod bip32;
+mod bip39;
+
+use crate::bip32::{DerivationPath, Prefix, XPrv, XPub};
+use crate::bip39::Mnemonic;
 use bs58;
 use rand::rngs::OsRng;
 use ripemd::Ripemd160;
@@ -23,7 +27,8 @@ impl Wallet {
 
     /// Create a wallet from a BIP39 mnemonic phrase and optional password.
     pub fn from_mnemonic(phrase: &str, password: &str) -> bip32::Result<Self> {
-        let mnemonic = Mnemonic::new(phrase, Default::default())?;
+        let mnemonic =
+            Mnemonic::new(phrase, Default::default()).map_err(|_| bip32::Error::InvalidMnemonic)?;
         let seed = mnemonic.to_seed(password);
         let master = XPrv::new(&seed)?;
         Ok(Self {
@@ -77,7 +82,7 @@ impl Wallet {
 
 /// Convert an extended public key to a Base58Check encoded address.
 fn address_from_xpub(xpub: &XPub) -> String {
-    let pk_bytes = xpub.public_key().to_bytes();
+    let pk_bytes = xpub.public_key().serialize();
     let sha = Sha256::digest(pk_bytes);
     let rip = Ripemd160::digest(sha);
     let mut payload = Vec::with_capacity(25);
