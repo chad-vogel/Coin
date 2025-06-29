@@ -1,0 +1,13 @@
+[package]
+name = "coin-wallet"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bip39 = "2"
+bip32 = { version = "0.5", features = ["mnemonic", "secp256k1"] }
+rand = "0.8"
+hex = "0.4"
+
+[dev-dependencies]
+hex-literal = "0.4"

@@ -1,5 +1,5 @@
 [workspace]
-members = ["proto", "p2p", "miner"]
+members = ["proto", "p2p", "miner", "wallet"]
 
 [package]
 name = "coin"
