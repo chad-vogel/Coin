@@ -1,4 +1,5 @@
 use clap::ValueEnum;
+use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::proto::{Chain, GetChain, GetPeers, NodeMessage, Peers, Ping, Pong, Transaction};
 use hex;
@@ -50,15 +51,6 @@ pub enum NodeType {
     Wallet,
     Miner,
     Verifier,
-}
-
-fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
-    for i in 0..difficulty {
-        if hash.get(i as usize).copied().unwrap_or(0) != 0 {
-            return false;
-        }
-    }
-    true
 }
 
 fn valid_block(chain: &Blockchain, block: &Block) -> bool {

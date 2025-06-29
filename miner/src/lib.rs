@@ -1,14 +1,6 @@
+use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt, coinbase_transaction};
 use sha2::{Digest, Sha256};
-
-fn meets_difficulty(hash: &[u8], difficulty: u32) -> bool {
-    for i in 0..difficulty {
-        if hash.get(i as usize).copied().unwrap_or(0) != 0 {
-            return false;
-        }
-    }
-    true
-}
 
 pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     let difficulty = chain.difficulty();
