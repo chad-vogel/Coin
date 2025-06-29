@@ -8,3 +8,4 @@ chain_file: "chain.bin"
 seed_peers:
   - "127.0.0.1:9001"
 peers_file: "peers.txt"
+max_msgs_per_sec: 10
