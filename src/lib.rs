@@ -9,6 +9,9 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod utils;
+pub use utils::meets_difficulty;
+
 /// Number of blocks used for difficulty adjustment
 pub const DIFFICULTY_WINDOW: usize = 3;
 /// Target time between blocks in seconds
