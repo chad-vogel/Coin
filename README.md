@@ -1,6 +1,6 @@
 # Coin
 
-This project aims to become a full-fledged coin system built with multiple crates. Protocol buffer definitions live in `coin-proto` and networking utilities live in `coin-p2p`. The main `coin` crate provides core blockchain functionality. Unit tests cover all functionality and code coverage is measured using `cargo tarpaulin`.
+This project aims to become a full-fledged coin system built with multiple crates. Network interactions are handled via a JSON-RPC interface exposed by the `coin-p2p` crate. The main `coin` crate provides core blockchain functionality. Unit tests cover all functionality and code coverage is measured using `cargo tarpaulin`.
 
 Each coin is divisible into 100&nbsp;000&nbsp;000 units allowing for very small transfers.
 

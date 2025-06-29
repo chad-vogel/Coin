@@ -1,11 +1,11 @@
 use bs58;
-pub use coin_proto::proto::Transaction;
-use prost::Message;
+pub use coin_proto::Transaction;
 use ripemd::Ripemd160;
 use secp256k1;
+use serde_json;
 use sha2::{Digest, Sha256};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -217,27 +217,27 @@ impl Block {
         hex::encode(hasher.finalize())
     }
 
-    pub fn to_proto(&self) -> coin_proto::proto::Block {
-        coin_proto::proto::Block {
-            header: Some(coin_proto::proto::BlockHeader {
+    pub fn to_rpc(&self) -> coin_proto::Block {
+        coin_proto::Block {
+            header: coin_proto::BlockHeader {
                 previous_hash: self.header.previous_hash.clone(),
                 merkle_root: self.header.merkle_root.clone(),
                 timestamp: self.header.timestamp,
                 nonce: self.header.nonce,
                 difficulty: self.header.difficulty,
-            }),
+            },
             transactions: self.transactions.clone(),
         }
     }
 
-    pub fn from_proto(pb: coin_proto::proto::Block) -> Option<Self> {
-        pb.header.map(|h| Block {
+    pub fn from_rpc(pb: coin_proto::Block) -> Option<Self> {
+        Some(Block {
             header: BlockHeader {
-                previous_hash: h.previous_hash,
-                merkle_root: h.merkle_root,
-                timestamp: h.timestamp,
-                nonce: h.nonce,
-                difficulty: h.difficulty,
+                previous_hash: pb.header.previous_hash,
+                merkle_root: pb.header.merkle_root,
+                timestamp: pb.header.timestamp,
+                nonce: pb.header.nonce,
+                difficulty: pb.header.difficulty,
             },
             transactions: pb.transactions,
         })
@@ -390,23 +390,20 @@ impl Blockchain {
     }
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        let chain = coin_proto::proto::Chain {
-            blocks: self.chain.iter().map(|b| b.to_proto()).collect(),
+        let chain = coin_proto::Chain {
+            blocks: self.chain.iter().map(|b| b.to_rpc()).collect(),
         };
-        let mut buf = Vec::new();
-        chain.encode(&mut buf).unwrap();
+        let data = serde_json::to_vec(&chain).unwrap();
         let mut f = File::create(path)?;
-        f.write_all(&buf)
+        f.write_all(&data)
     }
 
     pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
-        let mut buf = Vec::new();
-        let mut f = File::open(path)?;
-        f.read_to_end(&mut buf)?;
-        let chain_msg = coin_proto::proto::Chain::decode(&buf[..]).unwrap();
+        let f = File::open(path)?;
+        let chain_msg: coin_proto::Chain = serde_json::from_reader(f).unwrap();
         let mut bc = Blockchain::new();
         for pb in chain_msg.blocks {
-            if let Some(block) = Block::from_proto(pb) {
+            if let Some(block) = Block::from_rpc(pb) {
                 bc.add_block(block);
             }
         }
