@@ -51,6 +51,36 @@ be connected before a miner begins hashing and defaults to `1`. Additional nodes
 cargo run -p coin-p2p -- --port 9000 --node-type wallet
 ```
 
+## Configuration File
+
+Nodes load settings from a YAML file passed with `--config` (defaults to
+`config.yaml`). The repository includes an annotated example at
+`config.example.yaml`:
+
+```yaml
+# Example configuration for coin-p2p
+listeners:
+  - ip: "0.0.0.0"
+    port: 9000
+wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
+node_type: Miner
+min_peers: 1
+chain_file: "chain.bin"
+seed_peers:
+  - "127.0.0.1:9001"
+peers_file: "peers.txt"
+```
+
+Field descriptions:
+
+- `listeners` – network interfaces and ports to bind.
+- `wallet_address` – optional address used when mining rewards are paid.
+- `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
+- `min_peers` – how many peers must be connected before mining or verifying.
+- `chain_file` – path to the saved blockchain.
+- `seed_peers` – peers contacted on startup for bootstrapping.
+- `peers_file` – file for persisting discovered peers.
+
 ## Wallet Basics
 
 The `coin-wallet` crate offers a BIP32 HD wallet implementation.
