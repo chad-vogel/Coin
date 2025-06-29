@@ -1,5 +1,8 @@
-use bip32::{DerivationPath, Mnemonic, Prefix, XPrv};
+use bip32::{DerivationPath, Mnemonic, Prefix, PublicKey, XPrv, XPub};
+use bs58;
 use rand::rngs::OsRng;
+use ripemd::Ripemd160;
+use sha2::{Digest, Sha256};
 
 /// HD wallet holding a master extended private key.
 #[derive(Clone)]
@@ -50,6 +53,17 @@ impl Wallet {
         Ok(key)
     }
 
+    /// Derive a child extended public key for the given path.
+    pub fn derive_pub(&self, path: &str) -> bip32::Result<XPub> {
+        Ok(self.derive_priv(path)?.public_key())
+    }
+
+    /// Derive an address string from a BIP32 path.
+    pub fn derive_address(&self, path: &str) -> bip32::Result<String> {
+        let xpub = self.derive_pub(path)?;
+        Ok(address_from_xpub(&xpub))
+    }
+
     /// Serialize the master private key using the `xprv` prefix.
     pub fn master_xprv_string(&self) -> String {
         self.master.to_string(Prefix::XPRV).to_string()
@@ -61,6 +75,19 @@ impl Wallet {
     }
 }
 
+/// Convert an extended public key to a Base58Check encoded address.
+fn address_from_xpub(xpub: &XPub) -> String {
+    let pk_bytes = xpub.public_key().to_bytes();
+    let sha = Sha256::digest(pk_bytes);
+    let rip = Ripemd160::digest(sha);
+    let mut payload = Vec::with_capacity(25);
+    payload.push(0x00); // mainnet prefix
+    payload.extend_from_slice(&rip);
+    let checksum = Sha256::digest(Sha256::digest(&payload));
+    payload.extend_from_slice(&checksum[..4]);
+    bs58::encode(payload).into_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +97,8 @@ mod tests {
     const SEED: [u8; 16] = hex!("000102030405060708090a0b0c0d0e0f");
     const MASTER: &str = "xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi";
     const CHILD_0H: &str = "xprv9uHRZZhk6KAJC1avXpDAp4MDc3sQKNxDiPvvkX8Br5ngLNv1TxvUxt4cV1rGL5hj6KCesnDYUhd7oWgT11eZG7XnxHrnYeSvkzY7d2bhkJ7";
+    const ADDR_0H_0_0: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
+    const ADDR_0H_0_1: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
 
     #[test]
     fn master_from_seed() {
@@ -90,5 +119,14 @@ mod tests {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
         let wallet = Wallet::from_mnemonic(phrase, "").unwrap();
         assert!(wallet.mnemonic().is_some());
+    }
+
+    #[test]
+    fn derive_addresses() {
+        let wallet = Wallet::from_seed(&SEED).unwrap();
+        let addr0 = wallet.derive_address("m/0'/0/0").unwrap();
+        let addr1 = wallet.derive_address("m/0'/0/1").unwrap();
+        assert_eq!(addr0, ADDR_0H_0_0);
+        assert_eq!(addr1, ADDR_0H_0_1);
     }
 }

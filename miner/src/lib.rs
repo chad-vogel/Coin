@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn mining_adds_block() {
         let mut bc = Blockchain::new();
-        bc.add_transaction(new_transaction("a".into(), "b".into(), 1));
+        bc.add_transaction(new_transaction("a", "b", 1));
         let len_before = bc.len();
         let difficulty = bc.difficulty();
         let block = mine_block(&mut bc, "miner");
