@@ -9,19 +9,23 @@ pub const TARGET_BLOCK_TIME: u64 = 1;
 /// Reward paid to miners for producing a block
 pub const BLOCK_SUBSIDY: u64 = 50;
 
-pub fn new_transaction(sender: String, recipient: String, amount: u64) -> Transaction {
+pub fn new_transaction(
+    sender: impl Into<String>,
+    recipient: impl Into<String>,
+    amount: u64,
+) -> Transaction {
     Transaction {
-        sender,
-        recipient,
+        sender: sender.into(),
+        recipient: recipient.into(),
         amount,
     }
 }
 
 /// Create a coinbase transaction paying the block subsidy to `miner`
-pub fn coinbase_transaction(miner: String) -> Transaction {
+pub fn coinbase_transaction(miner: impl Into<String>) -> Transaction {
     Transaction {
         sender: String::new(),
-        recipient: miner,
+        recipient: miner.into(),
         amount: BLOCK_SUBSIDY,
     }
 }
@@ -188,7 +192,7 @@ mod tests {
 
     #[test]
     fn transaction_hash_consistent() {
-        let tx = new_transaction("alice".into(), "bob".into(), 10);
+        let tx = new_transaction("alice", "bob", 10);
         let hash1 = tx.hash();
         let hash2 = tx.hash();
         assert_eq!(hash1, hash2);
@@ -198,8 +202,8 @@ mod tests {
     fn mempool_and_blocks() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.len(), 0);
-        let tx1 = new_transaction("alice".into(), "bob".into(), 5);
-        let tx2 = new_transaction("carol".into(), "dave".into(), 7);
+        let tx1 = new_transaction("alice", "bob", 5);
+        let tx2 = new_transaction("carol", "dave", 7);
         bc.add_transaction(tx1.clone());
         bc.add_transaction(tx2.clone());
         // Candidate block should contain both transactions
@@ -265,7 +269,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction("miner".into())],
+            transactions: vec![coinbase_transaction("miner")],
         });
         assert_eq!(bc.balance("miner"), BLOCK_SUBSIDY as i64);
     }
