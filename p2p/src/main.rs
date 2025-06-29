@@ -9,6 +9,8 @@ struct Args {
     port: u16,
     #[arg(long, value_enum)]
     node_type: NodeType,
+    #[arg(long, default_value_t = 1)]
+    min_peers: usize,
     #[arg(long, default_value = "chain.bin")]
     chain_file: String,
 }
@@ -17,7 +19,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let node = Node::new(args.port, args.node_type);
+    let node = Node::new(args.port, args.node_type, Some(args.min_peers));
     if let Ok(chain) = Blockchain::load(&args.chain_file) {
         *node.chain_handle().lock().await = chain;
     }
