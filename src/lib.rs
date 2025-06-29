@@ -489,4 +489,61 @@ mod tests {
         assert_eq!(loaded.len(), bc.len());
         assert_eq!(loaded.last_block_hash(), bc.last_block_hash());
     }
+
+    fn address_from_secret(sk: &secp256k1::SecretKey) -> String {
+        let secp = secp256k1::Secp256k1::new();
+        let pk = secp256k1::PublicKey::from_secret_key(&secp, sk);
+        let pk_bytes = pk.serialize();
+        let sha = Sha256::digest(pk_bytes);
+        let rip = Ripemd160::digest(sha);
+        let mut payload = Vec::with_capacity(25);
+        payload.push(0x00);
+        payload.extend_from_slice(&rip);
+        let check = Sha256::digest(Sha256::digest(&payload));
+        payload.extend_from_slice(&check[..4]);
+        bs58::encode(payload).into_string()
+    }
+
+    #[test]
+    fn valid_address_checks() {
+        assert!(valid_address(A1));
+        assert!(valid_address(A2));
+        assert!(!valid_address("invalid"));
+        let bad_chars = "O".repeat(34);
+        assert!(!valid_address(&bad_chars));
+        let bad_len = "1".repeat(34);
+        assert!(!valid_address(&bad_len));
+    }
+
+    #[test]
+    fn sign_and_verify_transaction() {
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sender = address_from_secret(&sk);
+        let mut tx = new_transaction(&sender, A2, 5);
+        tx.sign(&sk);
+        assert!(tx.verify());
+    }
+
+    #[test]
+    fn verify_rejects_bad_signature_len() {
+        let mut tx = new_transaction(A1, A2, 5);
+        tx.signature = vec![0u8; 10];
+        assert!(!tx.verify());
+    }
+
+    #[test]
+    fn verify_rejects_invalid_recovery_id() {
+        let mut tx = new_transaction(A1, A2, 5);
+        tx.signature = vec![4u8; 65];
+        assert!(!tx.verify());
+    }
+
+    #[test]
+    fn verify_rejects_malformed_signature() {
+        let mut sig = vec![0u8; 65];
+        sig[0] = 0; // valid recovery id
+        let mut tx = new_transaction(A1, A2, 5);
+        tx.signature = sig;
+        assert!(!tx.verify());
+    }
 }
