@@ -540,4 +540,41 @@ mod tests {
         node_a.peers.lock().await.remove(&addr_b);
         node_b.peers.lock().await.remove(&addr_a);
     }
+
+    #[tokio::test]
+    async fn validate_block_logic() {
+        let mut chain = Blockchain::new();
+        chain.add_transaction(Transaction {
+            sender: "s".into(),
+            recipient: "r".into(),
+            amount: 1,
+        });
+        let genesis = chain.candidate_block();
+        chain.add_block(genesis.clone());
+
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 2,
+        };
+        let mut h = Sha256::new();
+        h.update(tx.hash());
+        let merkle = hex::encode(h.finalize());
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: genesis.hash(),
+                merkle_root: merkle.clone(),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        };
+
+        assert!(valid_block(&chain, &block));
+
+        let mut bad = block.clone();
+        bad.header.merkle_root = String::new();
+        assert!(!valid_block(&chain, &bad));
+    }
 }

@@ -23,4 +23,4 @@ jobs:
       - name: Test
         run: cargo test
       - name: Coverage
-        run: cargo tarpaulin --timeout 60 --out Xml
+        run: cargo tarpaulin --workspace --timeout 60 --out Xml --fail-under 90
