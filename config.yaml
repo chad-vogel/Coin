@@ -1,0 +1,7 @@
+listeners:
+  - ip: "0.0.0.0"
+    port: 9000
+wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
+node_type: Miner
+min_peers: 1
+chain_file: "chain.bin"
