@@ -159,8 +159,7 @@ impl Node {
             let chain = chain.clone();
             tokio::spawn(async move {
                 loop {
-                    if let Ok((mut socket, addr)) = listener.accept().await {
-                        peers.lock().await.insert(addr);
+                    if let Ok((mut socket, _addr)) = listener.accept().await {
                         let tx = tx.clone();
                         let peers = peers.clone();
                         let chain = chain.clone();
@@ -283,7 +282,6 @@ impl Node {
                                     Err(_) => break,
                                 }
                             }
-                            peers.lock().await.remove(&addr);
                         });
                     }
                 }
@@ -423,7 +421,8 @@ mod tests {
         let addr = addrs[0];
         node.connect(addr).await.unwrap();
         sleep(Duration::from_millis(200)).await;
-        assert!(!node.peers().await.is_empty());
+        let peers = node.peers().await;
+        assert!(peers.iter().any(|p| p.port() == addr.port()));
         let tx = Transaction {
             sender: "a".into(),
             recipient: "b".into(),
