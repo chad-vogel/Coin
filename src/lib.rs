@@ -269,6 +269,9 @@ impl Blockchain {
             return false;
         }
         if !tx.sender.is_empty() {
+            if !tx.verify() {
+                return false;
+            }
             let mut bal = self.balance(&tx.sender);
             for m in &self.mempool {
                 if m.sender == tx.sender && !m.sender.is_empty() {
@@ -450,6 +453,10 @@ mod tests {
     fn mempool_and_blocks() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.len(), 0);
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
         // fund both accounts
         bc.add_block(Block {
             header: BlockHeader {
@@ -460,12 +467,14 @@ mod tests {
                 difficulty: 0,
             },
             transactions: vec![
-                coinbase_transaction(A1, bc.block_subsidy()),
-                coinbase_transaction(A2, bc.block_subsidy()),
+                coinbase_transaction(&addr1, bc.block_subsidy()),
+                coinbase_transaction(&addr2, bc.block_subsidy()),
             ],
         });
-        let tx1 = new_transaction(A1, A2, 5);
-        let tx2 = new_transaction(A2, A1, 7);
+        let mut tx1 = new_transaction(&addr1, &addr2, 5);
+        tx1.sign(&sk1);
+        let mut tx2 = new_transaction(&addr2, &addr1, 7);
+        tx2.sign(&sk2);
         assert!(bc.add_transaction(tx1.clone()));
         assert!(bc.add_transaction(tx2.clone()));
         // Candidate block should contain both transactions
@@ -547,14 +556,19 @@ mod tests {
     #[test]
     fn reject_zero_amount_transaction() {
         let mut bc = Blockchain::new();
-        let tx = new_transaction(A1, A2, 0);
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let mut tx = new_transaction(&addr, A2, 0);
+        tx.sign(&sk);
         assert!(!bc.add_transaction(tx));
     }
 
     #[test]
     fn reject_insufficient_balance() {
         let mut bc = Blockchain::new();
-        // give A1 some coins
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        // give sender some coins
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -563,15 +577,20 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
         });
-        let tx = new_transaction(A1, A2, bc.block_subsidy() + 1);
+        let mut tx = new_transaction(&addr, A2, bc.block_subsidy() + 1);
+        tx.sign(&sk);
         assert!(!bc.add_transaction(tx));
     }
 
     #[test]
     fn fee_deducts_from_balance() {
         let mut bc = Blockchain::new();
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr2 = address_from_secret(&sk2);
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -580,14 +599,15 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr1, bc.block_subsidy())],
         });
-        let tx = new_transaction_with_fee(A1, A2, 5, 2);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 2);
+        tx.sign(&sk1);
         assert!(bc.add_transaction(tx.clone()));
         let block = bc.candidate_block();
         bc.add_block(block);
-        assert_eq!(bc.balance(A1), bc.block_subsidy() as i64 - 7);
-        assert_eq!(bc.balance(A2), 5);
+        assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 7);
+        assert_eq!(bc.balance(&addr2), 5);
     }
 
     #[test]
@@ -665,6 +685,45 @@ mod tests {
         let mut tx = new_transaction(A1, A2, 5);
         tx.signature = sig;
         assert!(!tx.verify());
+    }
+
+    #[test]
+    fn add_transaction_rejects_unsigned() {
+        let mut bc = Blockchain::new();
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
+        });
+        let tx = new_transaction(&addr, A2, 1);
+        assert!(!bc.add_transaction(tx));
+    }
+
+    #[test]
+    fn add_transaction_rejects_malformed_signature() {
+        let mut bc = Blockchain::new();
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
+        });
+        let mut tx = new_transaction(&addr, A2, 1);
+        tx.signature = vec![0u8; 10];
+        assert!(!bc.add_transaction(tx));
     }
 
     #[test]
