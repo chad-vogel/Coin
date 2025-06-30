@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -9,37 +9,36 @@ use crate::Block;
 /// Magic bytes identifying the start of a block.
 pub const MAGIC_BYTES: [u8; 4] = [0xF9, 0xBE, 0xB4, 0xD9];
 
-/// Maximum size of a blk.dat file in bytes (128 MiB).
-pub const MAX_BLOCKFILE_SIZE: u64 = 128 * 1024 * 1024;
-
 fn blockfile_path(dir: &Path, index: u32) -> PathBuf {
     dir.join(format!("blk{:05}.dat", index))
 }
 
-fn current_blockfile(dir: &Path) -> std::io::Result<(PathBuf, u32)> {
+/// Determine the next block index by inspecting existing files.
+fn next_index(dir: &Path) -> std::io::Result<u32> {
     fs::create_dir_all(dir)?;
-    let mut index = 0;
-    loop {
-        let path = blockfile_path(dir, index);
-        if !path.exists() {
-            if index == 0 {
-                return Ok((path, index));
+    let mut max: Option<u32> = None;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if let Some(name) = name.to_str() {
+            if name.starts_with("blk") && name.ends_with(".dat") {
+                if let Ok(i) = name[3..name.len() - 4].parse::<u32>() {
+                    max = Some(match max {
+                        Some(m) => m.max(i),
+                        None => i,
+                    });
+                }
             }
-            return Ok((blockfile_path(dir, index - 1), index - 1));
         }
-        index += 1;
     }
+    Ok(max.map_or(0, |m| m + 1))
 }
 
-/// Append a block to the blk.dat files in `dir`.
+/// Store `block` in a new `blkXXXXX.dat` file inside `dir`.
 pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
-    let (mut path, mut index) = current_blockfile(dir)?;
-    let mut file = OpenOptions::new().append(true).create(true).open(&path)?;
-    if file.metadata()?.len() >= MAX_BLOCKFILE_SIZE {
-        index += 1;
-        path = blockfile_path(dir, index);
-        file = OpenOptions::new().append(true).create(true).open(&path)?;
-    }
+    let index = next_index(dir)?;
+    let path = blockfile_path(dir, index);
+    let mut file = File::create(&path)?;
     let data = bincode::serialize(block).unwrap();
     file.write_all(&MAGIC_BYTES)?;
     file.write_all(&(data.len() as u32).to_le_bytes())?;
@@ -59,28 +58,28 @@ pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
         let mut file = File::open(&path)?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
-        let mut i = 0;
-        while i + 8 <= buf.len() {
-            if buf[i..i + 4] != MAGIC_BYTES {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "bad magic bytes",
-                ));
-            }
-            let len = u32::from_le_bytes([buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7]]) as usize;
-            i += 8;
-            if i + len > buf.len() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "unexpected eof",
-                ));
-            }
-            let block: Block = bincode::deserialize(&buf[i..i + len]).map_err(|_| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, "decode error")
-            })?;
-            blocks.push(block);
-            i += len;
+        if buf.len() < 8 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "block file too small",
+            ));
         }
+        if buf[..4] != MAGIC_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "bad magic bytes",
+            ));
+        }
+        let len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
+        if 8 + len != buf.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "block file length mismatch",
+            ));
+        }
+        let block: Block = bincode::deserialize(&buf[8..])
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "decode error"))?;
+        blocks.push(block);
         index += 1;
     }
     Ok(blocks)
@@ -115,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn append_creates_new_file_when_full() {
+    fn append_creates_separate_files() {
         let dir = tempdir().unwrap();
         let mut bc = Blockchain::new();
         let tx = coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy());
@@ -131,14 +130,8 @@ mod tests {
         });
         let block = bc.all()[0].clone();
         append_block(dir.path(), &block).unwrap();
-        let first = dir.path().join("blk00000.dat");
-        OpenOptions::new()
-            .append(true)
-            .open(&first)
-            .unwrap()
-            .set_len(MAX_BLOCKFILE_SIZE)
-            .unwrap();
         append_block(dir.path(), &block).unwrap();
+        assert!(dir.path().join("blk00000.dat").exists());
         assert!(dir.path().join("blk00001.dat").exists());
     }
 
