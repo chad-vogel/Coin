@@ -4,6 +4,7 @@ use ripemd::Ripemd160;
 use secp256k1;
 use serde_json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -341,6 +342,7 @@ pub struct Blockchain {
     chain: Vec<Block>,
     mempool: Vec<Transaction>,
     difficulty: u32,
+    utxos: HashMap<String, u64>,
 }
 
 impl Blockchain {
@@ -349,6 +351,7 @@ impl Blockchain {
             chain: Vec::new(),
             mempool: Vec::new(),
             difficulty: 1,
+            utxos: HashMap::new(),
         }
     }
 
@@ -370,24 +373,29 @@ impl Blockchain {
             if !tx.verify() {
                 return false;
             }
-            let mut bal = self.balance(&tx.sender);
-            for m in &self.mempool {
-                if m.sender == tx.sender && !m.sender.is_empty() {
-                    let extra: u64 = m.outputs.iter().map(|o| o.amount).sum();
-                    bal -= (m.amount + extra + m.fee) as i64;
+            if tx.inputs.is_empty() {
+                let bal = self.available_utxo(&tx.sender);
+                let total_out: u64 = tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>();
+                if bal < (total_out + tx.fee) as i64 {
+                    return false;
                 }
-                if m.recipient == tx.sender {
-                    bal += m.amount as i64;
-                }
-                for o in &m.outputs {
-                    if o.address == tx.sender {
-                        bal += o.amount as i64;
+            } else {
+                let mut sum_inputs = 0u64;
+                for inp in &tx.inputs {
+                    if !valid_address(&inp.address) {
+                        return false;
                     }
+                    let bal = self.available_utxo(&inp.address);
+                    if bal < inp.amount as i64 {
+                        return false;
+                    }
+                    sum_inputs += inp.amount;
                 }
-            }
-            let total_out: u64 = tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>();
-            if bal < (total_out + tx.fee) as i64 {
-                return false;
+                let total_out: u64 =
+                    tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>() + tx.fee;
+                if sum_inputs < total_out {
+                    return false;
+                }
             }
         }
         self.mempool.push(tx);
@@ -448,6 +456,27 @@ impl Blockchain {
         for tx in &block.transactions {
             if let Some(pos) = self.mempool.iter().position(|m| m == tx) {
                 self.mempool.remove(pos);
+            }
+
+            if tx.inputs.is_empty() {
+                if !tx.sender.is_empty() {
+                    let spend =
+                        tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>() + tx.fee;
+                    let entry = self.utxos.entry(tx.sender.clone()).or_insert(0);
+                    *entry = entry.saturating_sub(spend);
+                }
+            } else {
+                for inp in &tx.inputs {
+                    let entry = self.utxos.entry(inp.address.clone()).or_insert(0);
+                    *entry = entry.saturating_sub(inp.amount);
+                }
+            }
+
+            let entry = self.utxos.entry(tx.recipient.clone()).or_insert(0);
+            *entry += tx.amount;
+            for out in &tx.outputs {
+                let e = self.utxos.entry(out.address.clone()).or_insert(0);
+                *e += out.amount;
             }
         }
         self.chain.push(block);
@@ -587,19 +616,21 @@ impl Blockchain {
 
     /// Calculate the balance for `addr` by scanning the chain
     pub fn balance(&self, addr: &str) -> i64 {
-        let mut bal: i64 = 0;
-        for block in &self.chain {
-            for tx in &block.transactions {
-                if tx.sender == addr && !tx.sender.is_empty() {
-                    let extra: u64 = tx.outputs.iter().map(|o| o.amount).sum();
-                    bal -= (tx.amount + extra + tx.fee) as i64;
+        *self.utxos.get(addr).unwrap_or(&0) as i64
+    }
+
+    fn available_utxo(&self, addr: &str) -> i64 {
+        let mut bal = self.balance(addr);
+        for m in &self.mempool {
+            if m.inputs.is_empty() {
+                if m.sender == addr && !m.sender.is_empty() {
+                    let extra: u64 = m.outputs.iter().map(|o| o.amount).sum();
+                    bal -= (m.amount + extra + m.fee) as i64;
                 }
-                if tx.recipient == addr {
-                    bal += tx.amount as i64;
-                }
-                for o in &tx.outputs {
-                    if o.address == addr {
-                        bal += o.amount as i64;
+            } else {
+                for inp in &m.inputs {
+                    if inp.address == addr {
+                        bal -= inp.amount as i64;
                     }
                 }
             }
@@ -1053,7 +1084,7 @@ mod tests {
 
     #[test]
     fn prune_preserves_hash() {
-        let mut bc = Blockchain::new();
+        let bc = Blockchain::new();
         let tx = coinbase_transaction(A1, bc.block_subsidy());
         let merkle = compute_merkle_root(&[tx.clone()]);
         let block = Block {
