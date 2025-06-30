@@ -46,8 +46,8 @@ pub fn compute_merkle_root(txs: &[Transaction]) -> String {
 
 /// Number of blocks used for difficulty adjustment
 pub const DIFFICULTY_WINDOW: usize = 3;
-/// Target time between blocks in seconds
-pub const TARGET_BLOCK_TIME: u64 = 1;
+/// Target time between blocks in milliseconds
+pub const TARGET_BLOCK_MS: u64 = 400;
 /// Smallest unit of the coin (1 coin = 100 million units)
 pub const COIN: u64 = 100_000_000;
 /// Initial reward paid to miners for producing a block
@@ -280,6 +280,7 @@ impl TransactionExt for Transaction {
 pub struct BlockHeader {
     pub previous_hash: String,
     pub merkle_root: String,
+    /// Milliseconds since the Unix epoch
     pub timestamp: u64,
     pub nonce: u64,
     pub difficulty: u32,
@@ -413,7 +414,7 @@ impl Blockchain {
                 timestamp: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_secs(),
+                    .as_millis() as u64,
                 nonce: 0,
                 difficulty: self.difficulty,
             },
@@ -491,9 +492,9 @@ impl Blockchain {
             }
             if count > 0 {
                 let avg = total / count;
-                if avg < TARGET_BLOCK_TIME {
+                if avg < TARGET_BLOCK_MS {
                     self.difficulty = self.difficulty.saturating_add(1);
-                } else if avg > TARGET_BLOCK_TIME {
+                } else if avg > TARGET_BLOCK_MS {
                     self.difficulty = self.difficulty.saturating_sub(1);
                 }
             }
@@ -755,13 +756,13 @@ mod tests {
         assert!(diff_after_fast > 1);
 
         // mine blocks too slowly
-        let start = DIFFICULTY_WINDOW as u64 * 2;
+        let start = DIFFICULTY_WINDOW as u64 * TARGET_BLOCK_MS * 2;
         for i in 0..DIFFICULTY_WINDOW {
             let block = Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
                     merkle_root: String::new(),
-                    timestamp: start + (i as u64 * 2),
+                    timestamp: start + (i as u64 * TARGET_BLOCK_MS * 2),
                     nonce: 0,
                     difficulty: bc.difficulty(),
                 },

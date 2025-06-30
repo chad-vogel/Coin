@@ -57,6 +57,7 @@ pub struct Chain {
 pub struct BlockHeader {
     pub previous_hash: String,
     pub merkle_root: String,
+    /// Milliseconds since the Unix epoch
     pub timestamp: u64,
     pub nonce: u64,
     pub difficulty: u32,

@@ -27,7 +27,7 @@ pub mod rpc;
 const DEFAULT_MAX_MSGS_PER_SEC: u32 = 10;
 const DEFAULT_MAX_PEERS: usize = 32;
 const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
-const MAX_TIME_DRIFT_SECS: i64 = 2 * 60 * 60; // 2 hours
+const MAX_TIME_DRIFT_MS: i64 = 2 * 60 * 60 * 1000; // 2 hours
 
 /// Send a length-prefixed JSON-RPC message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
@@ -138,9 +138,9 @@ fn valid_block(chain: &Blockchain, block: &Block) -> bool {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs() as i64;
+        .as_millis() as i64;
     let ts = block.header.timestamp as i64;
-    if (ts - now).abs() > MAX_TIME_DRIFT_SECS {
+    if (ts - now).abs() > MAX_TIME_DRIFT_MS {
         return false;
     }
     if let Some(prev) = chain.all().last() {
@@ -1238,7 +1238,7 @@ mod tests {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis() as u64;
         let block_msg = RpcMessage::Block(coin_proto::Block {
             header: coin_proto::BlockHeader {
                 previous_hash: String::new(),
@@ -1307,7 +1307,7 @@ mod tests {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis() as u64;
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1396,12 +1396,12 @@ mod tests {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis() as u64;
         let future_block = Block {
             header: BlockHeader {
                 previous_hash: chain.last_block_hash().unwrap(),
                 merkle_root: merkle.clone(),
-                timestamp: now + (MAX_TIME_DRIFT_SECS as u64) + 1,
+                timestamp: now + (MAX_TIME_DRIFT_MS as u64) + 1,
                 nonce: 0,
                 difficulty: 0,
             },
@@ -1413,7 +1413,7 @@ mod tests {
             header: BlockHeader {
                 previous_hash: chain.last_block_hash().unwrap(),
                 merkle_root: merkle.clone(),
-                timestamp: now - (MAX_TIME_DRIFT_SECS as u64) - 1,
+                timestamp: now - (MAX_TIME_DRIFT_MS as u64) - 1,
                 nonce: 0,
                 difficulty: 0,
             },
