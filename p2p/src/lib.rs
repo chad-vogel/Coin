@@ -1,13 +1,12 @@
 use clap::ValueEnum;
 use coin::meets_difficulty;
-use coin::{Block, BlockHeader, Blockchain, TransactionExt};
+use coin::{Block, BlockHeader, Blockchain, TransactionExt, compute_merkle_root};
 use coin_proto::{
     Chain, GetBlock, GetChain, GetPeers, Handshake, NodeMessage, Peers, Ping, Pong, Transaction,
 };
 use hex;
 use miner::{mine_block, mine_block_threads};
 use serde_json;
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::{
@@ -86,21 +85,21 @@ fn valid_block(chain: &Blockchain, block: &Block) -> bool {
             return false;
         }
     }
-    let mut hasher = Sha256::new();
-    for tx in &block.transactions {
-        if (!tx.sender.is_empty() && !coin::valid_address(&tx.sender))
-            || !coin::valid_address(&tx.recipient)
-        {
+    if !block.transactions.is_empty() {
+        for tx in &block.transactions {
+            if (!tx.sender.is_empty() && !coin::valid_address(&tx.sender))
+                || !coin::valid_address(&tx.recipient)
+            {
+                return false;
+            }
+            if !tx.verify() {
+                return false;
+            }
+        }
+        let merkle = compute_merkle_root(&block.transactions);
+        if merkle != block.header.merkle_root {
             return false;
         }
-        if !tx.verify() {
-            return false;
-        }
-        hasher.update(tx.hash());
-    }
-    let merkle = hex::encode(hasher.finalize());
-    if merkle != block.header.merkle_root {
-        return false;
     }
     if let Ok(hash) = hex::decode(block.hash()) {
         meets_difficulty(&hash, block.header.difficulty)
@@ -469,7 +468,9 @@ impl Node {
                                             }
                                             NodeMessage::GetBlock(g) => {
                                                 let blocks = chain.lock().await.all();
-                                                if let Some(b) = blocks.into_iter().find(|b| b.hash() == g.hash) {
+                                                if let Some(b) =
+                                                    blocks.into_iter().find(|b| b.hash() == g.hash)
+                                                {
                                                     let msg = NodeMessage::Block(b.to_rpc());
                                                     let _ = write_msg(&mut socket, &msg).await;
                                                 }
@@ -1023,9 +1024,7 @@ mod tests {
             encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
-        let mut h = Sha256::new();
-        h.update(tx.hash());
-        let merkle = hex::encode(h.finalize());
+        let merkle = compute_merkle_root(&[tx.clone()]);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1090,9 +1089,7 @@ mod tests {
             encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
-        let mut h = Sha256::new();
-        h.update(tx.hash());
-        let merkle = hex::encode(h.finalize());
+        let merkle = compute_merkle_root(&[tx.clone()]);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1142,9 +1139,7 @@ mod tests {
             encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
-        let mut h = Sha256::new();
-        h.update(tx.hash());
-        let merkle = hex::encode(h.finalize());
+        let merkle = compute_merkle_root(&[tx.clone()]);
         let block = Block {
             header: BlockHeader {
                 previous_hash: genesis.hash(),
@@ -1177,9 +1172,7 @@ mod tests {
             encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
-        let mut h = Sha256::new();
-        h.update(tx.hash());
-        let merkle = hex::encode(h.finalize());
+        let merkle = compute_merkle_root(&[tx.clone()]);
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -1224,9 +1217,7 @@ mod tests {
             encrypted_message: Vec::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
-        let mut h = Sha256::new();
-        h.update(tx.hash());
-        let merkle = hex::encode(h.finalize());
+        let merkle = compute_merkle_root(&[tx.clone()]);
         let block = Block {
             header: BlockHeader {
                 previous_hash: genesis.hash(),
@@ -1615,7 +1606,9 @@ mod tests {
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
 
-        let get = NodeMessage::GetBlock(GetBlock { hash: "deadbeef".into() });
+        let get = NodeMessage::GetBlock(GetBlock {
+            hash: "deadbeef".into(),
+        });
         write_msg(&mut stream, &get).await.unwrap();
         let res = timeout(Duration::from_millis(100), read_msg(&mut stream)).await;
         assert!(res.is_err() || res.unwrap().is_err());

@@ -1,6 +1,8 @@
 use coin::meets_difficulty;
 use coin::new_transaction_with_fee;
-use coin::{Block, BlockHeader, Blockchain, TransactionExt, coinbase_transaction};
+use coin::{
+    Block, BlockHeader, Blockchain, TransactionExt, coinbase_transaction, compute_merkle_root,
+};
 use sha2::{Digest, Sha256};
 use std::sync::{
     Arc,
@@ -15,9 +17,6 @@ fn hash_bytes(block: &Block) -> [u8; 32] {
     hasher.update(block.header.timestamp.to_be_bytes());
     hasher.update(block.header.nonce.to_be_bytes());
     hasher.update(block.header.difficulty.to_be_bytes());
-    for tx in &block.transactions {
-        hasher.update(tx.hash());
-    }
     let result = hasher.finalize();
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&result);
@@ -32,11 +31,7 @@ pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     block
         .transactions
         .insert(0, coinbase_transaction(miner.to_string(), reward));
-    let mut h = Sha256::new();
-    for tx in &block.transactions {
-        h.update(tx.hash());
-    }
-    block.header.merkle_root = hex::encode(h.finalize());
+    block.header.merkle_root = compute_merkle_root(&block.transactions);
     block.header.difficulty = difficulty;
     loop {
         let hash = {
@@ -71,11 +66,7 @@ pub fn mine_block_threads(chain: &mut Blockchain, miner: &str, threads: usize) -
     let reward = chain.block_subsidy() + fee_total;
     base.transactions
         .insert(0, coinbase_transaction(miner.to_string(), reward));
-    let mut h = Sha256::new();
-    for tx in &base.transactions {
-        h.update(tx.hash());
-    }
-    base.header.merkle_root = hex::encode(h.finalize());
+    base.header.merkle_root = compute_merkle_root(&base.transactions);
     base.header.difficulty = difficulty;
 
     let found = Arc::new(AtomicBool::new(false));

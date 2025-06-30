@@ -12,6 +12,36 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod utils;
 pub use utils::meets_difficulty;
 
+/// Compute the Merkle root of a set of hex-encoded transaction hashes.
+pub fn merkle_root_from_hashes(hashes: &[String]) -> String {
+    if hashes.is_empty() {
+        return hex::encode(Sha256::digest(&[]));
+    }
+    let mut layer: Vec<Vec<u8>> = hashes
+        .iter()
+        .map(|h| hex::decode(h).unwrap_or_default())
+        .collect();
+    while layer.len() > 1 {
+        let mut next = Vec::new();
+        for chunk in layer.chunks(2) {
+            let left = &chunk[0];
+            let right = if chunk.len() > 1 { &chunk[1] } else { left };
+            let mut hasher = Sha256::new();
+            hasher.update(left);
+            hasher.update(right);
+            next.push(hasher.finalize().to_vec());
+        }
+        layer = next;
+    }
+    hex::encode(&layer[0])
+}
+
+/// Compute the Merkle root for a slice of transactions.
+pub fn compute_merkle_root(txs: &[Transaction]) -> String {
+    let hashes: Vec<String> = txs.iter().map(|t| t.hash()).collect();
+    merkle_root_from_hashes(&hashes)
+}
+
 /// Number of blocks used for difficulty adjustment
 pub const DIFFICULTY_WINDOW: usize = 3;
 /// Target time between blocks in seconds
@@ -203,7 +233,9 @@ pub struct Block {
 }
 
 impl Block {
-    /// Hash the block header and transactions for block identification
+    /// Hash the block header for block identification. The Merkle root in the
+    /// header commits to all transactions, so the transactions themselves are
+    /// not included here. This allows pruning without changing the block hash.
     pub fn hash(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.header.previous_hash.as_bytes());
@@ -211,9 +243,6 @@ impl Block {
         hasher.update(self.header.timestamp.to_be_bytes());
         hasher.update(self.header.nonce.to_be_bytes());
         hasher.update(self.header.difficulty.to_be_bytes());
-        for tx in &self.transactions {
-            hasher.update(tx.hash());
-        }
         hex::encode(hasher.finalize())
     }
 
@@ -241,6 +270,12 @@ impl Block {
             },
             transactions: pb.transactions,
         })
+    }
+
+    /// Remove transactions from the block while preserving the header. This
+    /// simulates pruning after enough confirmations.
+    pub fn prune(&mut self) {
+        self.transactions.clear();
     }
 }
 
@@ -292,11 +327,7 @@ impl Blockchain {
     /// Create a block from current mempool transactions without clearing them
     pub fn candidate_block(&self) -> Block {
         let previous_hash = self.last_block_hash().unwrap_or_default();
-        let mut hasher = Sha256::new();
-        for tx in &self.mempool {
-            hasher.update(tx.hash());
-        }
-        let merkle_root = hex::encode(hasher.finalize());
+        let merkle_root = compute_merkle_root(&self.mempool);
         Block {
             header: BlockHeader {
                 previous_hash,
@@ -388,16 +419,16 @@ impl Blockchain {
                 return false;
             }
 
-            let mut hasher = Sha256::new();
-            for tx in &block.transactions {
-                if !tx.sender.is_empty() && !tx.verify() {
+            if !block.transactions.is_empty() {
+                for tx in &block.transactions {
+                    if !tx.sender.is_empty() && !tx.verify() {
+                        return false;
+                    }
+                }
+                let merkle = compute_merkle_root(&block.transactions);
+                if merkle != block.header.merkle_root {
                     return false;
                 }
-                hasher.update(tx.hash());
-            }
-            let merkle = hex::encode(hasher.finalize());
-            if merkle != block.header.merkle_root {
-                return false;
             }
 
             if let Ok(hash) = hex::decode(block.hash()) {
@@ -482,6 +513,17 @@ impl Blockchain {
 
     pub fn mempool_len(&self) -> usize {
         self.mempool.len()
+    }
+
+    /// Prune transactions from blocks older than `depth` from the tip.
+    pub fn prune(&mut self, depth: usize) {
+        let len = self.chain.len();
+        if len <= depth {
+            return;
+        }
+        for block in &mut self.chain[..len - depth] {
+            block.prune();
+        }
     }
 }
 
@@ -584,12 +626,10 @@ mod tests {
         let mut bc = Blockchain::new();
         assert_eq!(bc.balance(A1), 0);
         let tx = coinbase_transaction(A1, bc.block_subsidy());
-        let mut h = Sha256::new();
-        h.update(tx.hash());
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
-                merkle_root: hex::encode(h.finalize()),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
@@ -669,12 +709,10 @@ mod tests {
     fn save_and_load_chain() {
         let mut bc = Blockchain::new();
         let tx = coinbase_transaction(A1, bc.block_subsidy());
-        let mut h = Sha256::new();
-        h.update(tx.hash());
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
-                merkle_root: hex::encode(h.finalize()),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
@@ -849,5 +887,42 @@ mod tests {
         let mut bc2 = Blockchain::new();
         bc2.load_mempool(tmp.path()).unwrap();
         assert_eq!(bc.mempool, bc2.mempool);
+    }
+
+    #[test]
+    fn merkle_root_tree() {
+        let tx1 = coinbase_transaction(A1, 1);
+        let tx2 = coinbase_transaction(A2, 1);
+        let manual = {
+            let mut hasher = Sha256::new();
+            hasher.update(hex::decode(tx1.hash()).unwrap());
+            hasher.update(hex::decode(tx2.hash()).unwrap());
+            hex::encode(hasher.finalize())
+        };
+        let calc = compute_merkle_root(&[tx1, tx2]);
+        assert_eq!(manual, calc);
+    }
+
+    #[test]
+    fn prune_preserves_hash() {
+        let mut bc = Blockchain::new();
+        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let merkle = compute_merkle_root(&[tx.clone()]);
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: merkle,
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        };
+        let hash_before = block.hash();
+        let mut block_pruned = block.clone();
+        block_pruned.prune();
+        assert_eq!(hash_before, block_pruned.hash());
+        assert!(Blockchain::validate_chain(&[block.clone()]));
+        assert!(Blockchain::validate_chain(&[block_pruned.clone()]));
     }
 }
