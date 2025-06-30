@@ -412,9 +412,8 @@ impl Node {
         let path = std::path::Path::new("mempool.bin");
         if path.exists() {
             let mut chain = self.chain.lock().await;
-            if chain.load_mempool(path).is_ok() {
-                let _ = std::fs::remove_file(path);
-            }
+            let _ = chain.load_mempool(path);
+            let _ = std::fs::remove_file(path);
         }
     }
 
