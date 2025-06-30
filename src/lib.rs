@@ -4,6 +4,7 @@ use ripemd::Ripemd160;
 use secp256k1;
 use serde_json;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -341,6 +342,7 @@ pub struct Blockchain {
     chain: Vec<Block>,
     mempool: Vec<Transaction>,
     difficulty: u32,
+    utxos: HashMap<String, u64>,
 }
 
 impl Blockchain {
@@ -349,6 +351,7 @@ impl Blockchain {
             chain: Vec::new(),
             mempool: Vec::new(),
             difficulty: 1,
+            utxos: HashMap::new(),
         }
     }
 
@@ -370,24 +373,29 @@ impl Blockchain {
             if !tx.verify() {
                 return false;
             }
-            let mut bal = self.balance(&tx.sender);
-            for m in &self.mempool {
-                if m.sender == tx.sender && !m.sender.is_empty() {
-                    let extra: u64 = m.outputs.iter().map(|o| o.amount).sum();
-                    bal -= (m.amount + extra + m.fee) as i64;
+            if tx.inputs.is_empty() {
+                let bal = self.available_utxo(&tx.sender);
+                let total_out: u64 = tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>();
+                if bal < (total_out + tx.fee) as i64 {
+                    return false;
                 }
-                if m.recipient == tx.sender {
-                    bal += m.amount as i64;
-                }
-                for o in &m.outputs {
-                    if o.address == tx.sender {
-                        bal += o.amount as i64;
+            } else {
+                let mut sum_inputs = 0u64;
+                for inp in &tx.inputs {
+                    if !valid_address(&inp.address) {
+                        return false;
                     }
+                    let bal = self.available_utxo(&inp.address);
+                    if bal < inp.amount as i64 {
+                        return false;
+                    }
+                    sum_inputs += inp.amount;
                 }
-            }
-            let total_out: u64 = tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>();
-            if bal < (total_out + tx.fee) as i64 {
-                return false;
+                let total_out: u64 =
+                    tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>() + tx.fee;
+                if sum_inputs < total_out {
+                    return false;
+                }
             }
         }
         self.mempool.push(tx);
@@ -448,6 +456,27 @@ impl Blockchain {
         for tx in &block.transactions {
             if let Some(pos) = self.mempool.iter().position(|m| m == tx) {
                 self.mempool.remove(pos);
+            }
+
+            if tx.inputs.is_empty() {
+                if !tx.sender.is_empty() {
+                    let spend =
+                        tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>() + tx.fee;
+                    let entry = self.utxos.entry(tx.sender.clone()).or_insert(0);
+                    *entry = entry.saturating_sub(spend);
+                }
+            } else {
+                for inp in &tx.inputs {
+                    let entry = self.utxos.entry(inp.address.clone()).or_insert(0);
+                    *entry = entry.saturating_sub(inp.amount);
+                }
+            }
+
+            let entry = self.utxos.entry(tx.recipient.clone()).or_insert(0);
+            *entry += tx.amount;
+            for out in &tx.outputs {
+                let e = self.utxos.entry(out.address.clone()).or_insert(0);
+                *e += out.amount;
             }
         }
         self.chain.push(block);
@@ -587,19 +616,21 @@ impl Blockchain {
 
     /// Calculate the balance for `addr` by scanning the chain
     pub fn balance(&self, addr: &str) -> i64 {
-        let mut bal: i64 = 0;
-        for block in &self.chain {
-            for tx in &block.transactions {
-                if tx.sender == addr && !tx.sender.is_empty() {
-                    let extra: u64 = tx.outputs.iter().map(|o| o.amount).sum();
-                    bal -= (tx.amount + extra + tx.fee) as i64;
+        *self.utxos.get(addr).unwrap_or(&0) as i64
+    }
+
+    fn available_utxo(&self, addr: &str) -> i64 {
+        let mut bal = self.balance(addr);
+        for m in &self.mempool {
+            if m.inputs.is_empty() {
+                if m.sender == addr && !m.sender.is_empty() {
+                    let extra: u64 = m.outputs.iter().map(|o| o.amount).sum();
+                    bal -= (m.amount + extra + m.fee) as i64;
                 }
-                if tx.recipient == addr {
-                    bal += tx.amount as i64;
-                }
-                for o in &tx.outputs {
-                    if o.address == addr {
-                        bal += o.amount as i64;
+            } else {
+                for inp in &m.inputs {
+                    if inp.address == addr {
+                        bal -= inp.amount as i64;
                     }
                 }
             }
@@ -801,7 +832,10 @@ mod tests {
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
-                merkle_root: String::new(),
+                merkle_root: compute_merkle_root(&[coinbase_transaction(
+                    &addr1,
+                    bc.block_subsidy(),
+                )]),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
@@ -1053,7 +1087,7 @@ mod tests {
 
     #[test]
     fn prune_preserves_hash() {
-        let mut bc = Blockchain::new();
+        let bc = Blockchain::new();
         let tx = coinbase_transaction(A1, bc.block_subsidy());
         let merkle = compute_merkle_root(&[tx.clone()]);
         let block = Block {
@@ -1141,6 +1175,142 @@ mod tests {
         ];
         bc.replace(tie_longer);
         assert_eq!(bc.len(), 2);
+    }
+
+    #[test]
+    fn available_utxo_considers_mempool() {
+        let mut bc = Blockchain::new();
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let coinbase = coinbase_transaction(&addr1, bc.block_subsidy());
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[coinbase.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coinbase.clone()],
+        });
+        assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        tx.sign(&sk1);
+        assert!(bc.add_transaction(tx));
+        assert_eq!(bc.available_utxo(&addr1), bc.block_subsidy() as i64 - 6);
+        assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64);
+        let block = bc.candidate_block();
+        bc.add_block(block);
+        assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 6);
+    }
+
+    #[test]
+    fn load_rebuilds_utxos() {
+        let mut bc = Blockchain::new();
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let cb = coinbase_transaction(&addr1, bc.block_subsidy());
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[cb.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![cb.clone()],
+        });
+        let mut tx = new_transaction(&addr1, &addr2, 10);
+        tx.sign(&sk1);
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: bc.last_block_hash().unwrap(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        });
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        let loaded = Blockchain::load(dir.path()).unwrap();
+        assert_eq!(loaded.balance(&addr1), bc.balance(&addr1));
+        assert_eq!(loaded.balance(&addr2), bc.balance(&addr2));
+    }
+
+    #[test]
+    fn multi_output_transaction_construction() {
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sender = address_from_secret(&sk);
+        let tx = new_multi_transaction_with_fee(
+            &sender,
+            vec![(A1.to_string(), 2), (A2.to_string(), 3)],
+            1,
+        );
+        assert_eq!(tx.recipient, A1);
+        assert_eq!(tx.amount, 2);
+        assert_eq!(tx.outputs.len(), 1);
+        assert_eq!(tx.outputs[0].address, A2);
+        assert_eq!(tx.outputs[0].amount, 3);
+        assert_eq!(tx.fee, 1);
+    }
+
+    #[test]
+    fn prune_removes_old_transactions() {
+        let mut bc = Blockchain::new();
+        for i in 0..3 {
+            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            bc.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: compute_merkle_root(&[tx.clone()]),
+                    timestamp: i as u64,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx],
+            });
+        }
+        bc.prune(1);
+        assert!(bc.chain[0].transactions.is_empty());
+        assert!(bc.chain[1].transactions.is_empty());
+        assert!(!bc.chain[2].transactions.is_empty());
+    }
+
+    #[test]
+    fn add_block_consumes_inputs() {
+        let mut bc = Blockchain::new();
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let cb = coinbase_transaction(&addr1, bc.block_subsidy());
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[cb.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![cb.clone()],
+        });
+        let mut tx = new_transaction(&addr1, &addr2, 10);
+        tx.inputs.push(TransactionInput {
+            address: addr1.clone(),
+            amount: 10,
+        });
+        tx.sign(&sk1);
+        assert!(bc.add_transaction(tx.clone()));
+        let block = bc.candidate_block();
+        bc.add_block(block);
+        assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 10);
+        assert_eq!(bc.balance(&addr2), 10);
     }
 
     // Strategy to generate random valid addresses using secret keys
