@@ -79,7 +79,7 @@ fn load_or_create_key(path: &str) -> (secp256k1::SecretKey, secp256k1::PublicKey
     (sk, pk)
 }
 
-fn sign_handshake(sk: &secp256k1::SecretKey, network_id: &str, version: u32) -> Vec<u8> {
+pub fn sign_handshake(sk: &secp256k1::SecretKey, network_id: &str, version: u32) -> Vec<u8> {
     let mut hasher = sha2::Sha256::new();
     hasher.update(network_id.as_bytes());
     hasher.update(version.to_be_bytes());
@@ -94,7 +94,7 @@ fn sign_handshake(sk: &secp256k1::SecretKey, network_id: &str, version: u32) -> 
     out
 }
 
-fn verify_handshake(h: &Handshake) -> bool {
+pub fn verify_handshake(h: &Handshake) -> bool {
     if h.public_key.len() != 33 || h.signature.len() != 65 {
         return false;
     }
