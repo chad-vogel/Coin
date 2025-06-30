@@ -28,6 +28,11 @@ pub struct Peers {
 pub struct GetChain;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GetBlock {
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chain {
     pub blocks: Vec<Block>,
 }
@@ -62,6 +67,7 @@ pub enum NodeMessage {
     GetPeers(GetPeers),
     Peers(Peers),
     GetChain(GetChain),
+    GetBlock(GetBlock),
     Chain(Chain),
     Block(Block),
     Handshake(Handshake),

@@ -2,7 +2,7 @@ use clap::ValueEnum;
 use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt};
 use coin_proto::{
-    Chain, GetChain, GetPeers, Handshake, NodeMessage, Peers, Ping, Pong, Transaction,
+    Chain, GetBlock, GetChain, GetPeers, Handshake, NodeMessage, Peers, Ping, Pong, Transaction,
 };
 use hex;
 use miner::{mine_block, mine_block_threads};
@@ -466,6 +466,13 @@ impl Node {
                                                     blocks: rpc_blocks,
                                                 });
                                                 let _ = write_msg(&mut socket, &msg).await;
+                                            }
+                                            NodeMessage::GetBlock(g) => {
+                                                let blocks = chain.lock().await.all();
+                                                if let Some(b) = blocks.into_iter().find(|b| b.hash() == g.hash) {
+                                                    let msg = NodeMessage::Block(b.to_rpc());
+                                                    let _ = write_msg(&mut socket, &msg).await;
+                                                }
                                             }
                                             NodeMessage::Chain(c) => {
                                                 let blocks: Vec<Block> = c
@@ -1513,6 +1520,104 @@ mod tests {
         let mut s2 = TcpStream::connect(addr).await.unwrap();
         write_msg(&mut s2, &hs).await.unwrap();
         let res = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
+        assert!(res.is_err() || res.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn get_block_returns_block() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let (block, hash) = {
+            let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
+            let block = Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![coinbase_transaction(A1, reward)],
+            };
+            let hash = block.hash();
+            chain.add_block(block.clone());
+            (block, hash)
+        };
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let hs = NodeMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let get = NodeMessage::GetBlock(GetBlock { hash });
+        write_msg(&mut stream, &get).await.unwrap();
+        match read_msg(&mut stream).await.unwrap() {
+            NodeMessage::Block(b) => {
+                let got = Block::from_rpc(b).unwrap();
+                assert_eq!(got, block);
+            }
+            other => panic!("expected Block, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_block_unknown_yields_no_response() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        {
+            let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![coinbase_transaction(A1, reward)],
+            });
+        }
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let hs = NodeMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let get = NodeMessage::GetBlock(GetBlock { hash: "deadbeef".into() });
+        write_msg(&mut stream, &get).await.unwrap();
+        let res = timeout(Duration::from_millis(100), read_msg(&mut stream)).await;
         assert!(res.is_err() || res.unwrap().is_err());
     }
 
