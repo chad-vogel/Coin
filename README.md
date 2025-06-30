@@ -12,7 +12,7 @@ Blocks contain a header and a list of transactions. The header stores:
 - `merkle_root` – hash of all transactions in the block
 - `timestamp` – seconds since the Unix epoch
 - `nonce` – value modified by miners to satisfy difficulty
-- `difficulty` – number of leading zero bytes required in the block hash
+- `difficulty` – number of leading zero bits required in the block hash
 
 The main crate exposes helper methods for constructing transactions and
 calculating block hashes.
@@ -25,7 +25,7 @@ themselves. The subsidy starts at 50 coins and halves every `HALVING_INTERVAL`
 (200,000) blocks until a maximum of 20 million coins have been issued.
 After inserting the coinbase transaction, miners repeatedly hash the block
 header while incrementing the `nonce` until the SHA256 digest has the required
-number of leading zero bytes, defined by the `difficulty` field. Once a valid
+number of leading zero bits, defined by the `difficulty` field. Once a valid
 block is produced it is broadcast to peers and appended to the local chain.
 
 ### Difficulty Adjustment
