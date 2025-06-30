@@ -8,7 +8,8 @@ mod real_cli {
     use anyhow::{Result, anyhow};
     use clap::{Parser, Subcommand};
     use coin::{Blockchain, TransactionExt, new_transaction_with_fee};
-    use coin_proto::{Chain, GetChain, Handshake, NodeMessage, Transaction};
+    use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
+    use coin_proto::{Chain, GetChain, Handshake, Transaction};
     use coin_wallet::Wallet;
     use rand::rngs::OsRng;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -106,21 +107,12 @@ mod real_cli {
         }
     }
 
-    async fn write_msg(stream: &mut TcpStream, msg: &NodeMessage) -> Result<()> {
-        let buf = serde_json::to_vec(msg)?;
-        let len = (buf.len() as u32).to_be_bytes();
-        stream.write_all(&len).await?;
-        stream.write_all(&buf).await?;
-        Ok(())
+    async fn write_msg(stream: &mut TcpStream, msg: &RpcMessage) -> Result<()> {
+        write_rpc(stream, msg).await.map_err(Into::into)
     }
 
-    async fn read_msg(stream: &mut TcpStream) -> Result<NodeMessage> {
-        let mut len_buf = [0u8; 4];
-        stream.read_exact(&mut len_buf).await?;
-        let len = u32::from_be_bytes(len_buf) as usize;
-        let mut buf = vec![0u8; len];
-        stream.read_exact(&mut buf).await?;
-        Ok(serde_json::from_slice(&buf)?)
+    async fn read_msg(stream: &mut TcpStream) -> Result<RpcMessage> {
+        read_rpc(stream).await.map_err(Into::into)
     }
 
     async fn rpc_connect(addr: &str) -> Result<TcpStream> {
@@ -133,7 +125,7 @@ mod real_cli {
         let sk = SecretKey::new(&mut rng);
         let secp = Secp256k1::new();
         let pk = PublicKey::from_secret_key(&secp, &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".to_string(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -141,7 +133,7 @@ mod real_cli {
         });
         write_msg(&mut stream, &hs).await?;
         match read_msg(&mut stream).await? {
-            NodeMessage::Handshake(h)
+            RpcMessage::Handshake(h)
                 if h.network_id == "coin" && h.version == 1 && verify_handshake(&h) => {}
             _ => return Err(anyhow!("handshake failed")),
         }
@@ -150,11 +142,11 @@ mod real_cli {
 
     async fn fetch_chain(addr: &str) -> Result<Vec<coin::Block>> {
         let mut stream = rpc_connect(addr).await?;
-        let get = NodeMessage::GetChain(GetChain {});
+        let get = RpcMessage::GetChain(GetChain {});
         write_msg(&mut stream, &get).await?;
         loop {
             match read_msg(&mut stream).await? {
-                NodeMessage::Chain(Chain { blocks }) => {
+                RpcMessage::Chain(Chain { blocks }) => {
                     let chain: Vec<_> = blocks
                         .into_iter()
                         .filter_map(coin::Block::from_rpc)
@@ -168,7 +160,7 @@ mod real_cli {
 
     async fn send_transaction(addr: &str, tx: &Transaction) -> Result<()> {
         let mut stream = rpc_connect(addr).await?;
-        let msg = NodeMessage::Transaction(tx.clone());
+        let msg = RpcMessage::Transaction(tx.clone());
         write_msg(&mut stream, &msg).await?;
         Ok(())
     }

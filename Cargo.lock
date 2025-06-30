@@ -259,6 +259,7 @@ dependencies = [
  "coin-wallet",
  "hex",
  "hex-literal",
+ "jsonrpc-lite",
  "miner",
  "proptest",
  "rand 0.8.5",
@@ -502,6 +503,16 @@ name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
+
+[[package]]
+name = "jsonrpc-lite"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00f1066a393f8bd9aefd2ed69a0a2bc39d1b6d2fdf55d00acb27f4242b403839"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "lazy_static"

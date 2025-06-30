@@ -76,21 +76,6 @@ pub struct Handshake {
     pub signature: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "msg")]
-pub enum NodeMessage {
-    Transaction(Transaction),
-    Ping(Ping),
-    Pong(Pong),
-    GetPeers(GetPeers),
-    Peers(Peers),
-    GetChain(GetChain),
-    GetBlock(GetBlock),
-    Chain(Chain),
-    Block(Block),
-    Handshake(Handshake),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

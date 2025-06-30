@@ -1,9 +1,8 @@
+use crate::rpc::{RpcMessage, read_rpc, write_rpc};
 use clap::ValueEnum;
 use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt, compute_merkle_root};
-use coin_proto::{
-    Chain, GetBlock, GetChain, GetPeers, Handshake, NodeMessage, Peers, Ping, Pong, Transaction,
-};
+use coin_proto::{Chain, GetBlock, GetChain, GetPeers, Handshake, Peers, Ping, Pong, Transaction};
 use hex;
 use miner::{mine_block, mine_block_threads};
 use rand::rngs::OsRng;
@@ -23,6 +22,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, Instant, timeout};
 
 pub mod config;
+pub mod rpc;
 
 const DEFAULT_MAX_MSGS_PER_SEC: u32 = 10;
 const DEFAULT_MAX_PEERS: usize = 32;
@@ -30,30 +30,13 @@ const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
 const MAX_TIME_DRIFT_SECS: i64 = 2 * 60 * 60; // 2 hours
 
 /// Send a length-prefixed JSON-RPC message over the socket
-async fn write_msg(socket: &mut TcpStream, msg: &NodeMessage) -> tokio::io::Result<()> {
-    let buf = serde_json::to_vec(msg)
-        .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?;
-    let len = (buf.len() as u32).to_be_bytes();
-    socket.write_all(&len).await?;
-    socket.write_all(&buf).await?;
-    Ok(())
+async fn write_msg(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
+    write_rpc(socket, msg).await
 }
 
 /// Read a length-prefixed JSON-RPC message from the socket
-async fn read_msg(socket: &mut TcpStream) -> tokio::io::Result<NodeMessage> {
-    let mut len_buf = [0u8; 4];
-    socket.read_exact(&mut len_buf).await?;
-    let len = u32::from_be_bytes(len_buf) as usize;
-    if len > MAX_MSG_BYTES {
-        return Err(tokio::io::Error::new(
-            tokio::io::ErrorKind::InvalidData,
-            "message too large",
-        ));
-    }
-    let mut buf = vec![0u8; len];
-    socket.read_exact(&mut buf).await?;
-    Ok(serde_json::from_slice(&buf)
-        .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?)
+async fn read_msg(socket: &mut TcpStream) -> tokio::io::Result<RpcMessage> {
+    read_rpc(socket).await
 }
 
 async fn read_with_timeout(socket: &mut TcpStream) -> tokio::io::Result<bool> {
@@ -198,7 +181,7 @@ async fn broadcast_block_internal(
     proxy: Option<SocketAddr>,
 ) {
     let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
-    let msg = NodeMessage::Block(coin_proto::Block {
+    let msg = RpcMessage::Block(coin_proto::Block {
         header: coin_proto::BlockHeader {
             previous_hash: block.header.previous_hash.clone(),
             merkle_root: block.header.merkle_root.clone(),
@@ -211,7 +194,7 @@ async fn broadcast_block_internal(
     for addr in list {
         match connect_with_proxy(addr, proxy).await {
             Ok(mut stream) => {
-                let hs = NodeMessage::Handshake(Handshake {
+                let hs = RpcMessage::Handshake(Handshake {
                     network_id: network_id.to_string(),
                     version,
                     public_key: pk.serialize().to_vec(),
@@ -223,7 +206,7 @@ async fn broadcast_block_internal(
                 }
                 if let Ok(resp) = read_msg(&mut stream).await {
                     match resp {
-                        NodeMessage::Handshake(h)
+                        RpcMessage::Handshake(h)
                             if h.network_id == network_id
                                 && h.version == version
                                 && verify_handshake(&h) => {}
@@ -459,7 +442,7 @@ impl Node {
                             return;
                         }
                         if let Ok(mut stream) = connect_with_proxy(addr, proxy).await {
-                            let hs = NodeMessage::Handshake(Handshake {
+                            let hs = RpcMessage::Handshake(Handshake {
                                 network_id: nid.clone(),
                                 version: ver,
                                 public_key: pubk.serialize().to_vec(),
@@ -467,9 +450,9 @@ impl Node {
                             });
                             if write_msg(&mut stream, &hs).await.is_ok() {
                                 if let Ok(resp) = read_msg(&mut stream).await {
-                                    if matches!(resp, NodeMessage::Handshake(h) if verify_handshake(&h))
+                                    if matches!(resp, RpcMessage::Handshake(h) if verify_handshake(&h))
                                     {
-                                        let ping = NodeMessage::Ping(Ping {});
+                                        let ping = RpcMessage::Ping;
                                         if write_msg(&mut stream, &ping).await.is_ok() {
                                             match read_with_timeout(&mut stream).await {
                                                 Ok(true) => return,
@@ -596,7 +579,7 @@ impl Node {
                                 Ok(m) => m,
                                 Err(_) => return,
                             };
-                            if let NodeMessage::Handshake(h) = msg {
+                            if let RpcMessage::Handshake(h) = msg {
                                 if h.network_id != nid || h.version != ver || !verify_handshake(&h)
                                 {
                                     return;
@@ -613,7 +596,7 @@ impl Node {
                                 drop(set);
                                 rates.lock().await.insert(a, (Instant::now(), 0));
                             }
-                            let resp = NodeMessage::Handshake(Handshake {
+                            let resp = RpcMessage::Handshake(Handshake {
                                 network_id: nid.clone(),
                                 version: ver,
                                 public_key: pubk.serialize().to_vec(),
@@ -642,28 +625,28 @@ impl Node {
                                             }
                                         }
                                         match msg {
-                                            NodeMessage::Transaction(t) => {
+                                            RpcMessage::Transaction(t) => {
                                                 let mut chain = chain.lock().await;
                                                 if chain.add_transaction(t.clone()) {
                                                     let _ = tx.send(t.clone()).await;
                                                 }
                                             }
-                                            NodeMessage::Ping(_) => {
-                                                let resp = NodeMessage::Pong(Pong {});
+                                            RpcMessage::Ping => {
+                                                let resp = RpcMessage::Pong;
                                                 let _ = write_msg(&mut socket, &resp).await;
                                             }
-                                            NodeMessage::Pong(_) => {}
-                                            NodeMessage::GetPeers(_) => {
+                                            RpcMessage::Pong => {}
+                                            RpcMessage::GetPeers => {
                                                 let list: Vec<String> = peers
                                                     .lock()
                                                     .await
                                                     .iter()
                                                     .map(|a| a.to_string())
                                                     .collect();
-                                                let msg = NodeMessage::Peers(Peers { addrs: list });
+                                                let msg = RpcMessage::Peers(Peers { addrs: list });
                                                 let _ = write_msg(&mut socket, &msg).await;
                                             }
-                                            NodeMessage::Peers(p) => {
+                                            RpcMessage::Peers(p) => {
                                                 for s in p.addrs {
                                                     if let Ok(mut addrs) =
                                                         StdToSocketAddrs::to_socket_addrs(&s)
@@ -674,27 +657,26 @@ impl Node {
                                                     }
                                                 }
                                             }
-                                            NodeMessage::GetChain(_) => {
+                                            RpcMessage::GetChain => {
                                                 let blocks = chain.lock().await.all();
                                                 let rpc_blocks: Vec<coin_proto::Block> = blocks
                                                     .into_iter()
                                                     .map(|b| b.to_rpc())
                                                     .collect();
-                                                let msg = NodeMessage::Chain(Chain {
-                                                    blocks: rpc_blocks,
-                                                });
+                                                let msg =
+                                                    RpcMessage::Chain(Chain { blocks: rpc_blocks });
                                                 let _ = write_msg(&mut socket, &msg).await;
                                             }
-                                            NodeMessage::GetBlock(g) => {
+                                            RpcMessage::GetBlock(g) => {
                                                 let blocks = chain.lock().await.all();
                                                 if let Some(b) =
                                                     blocks.into_iter().find(|b| b.hash() == g.hash)
                                                 {
-                                                    let msg = NodeMessage::Block(b.to_rpc());
+                                                    let msg = RpcMessage::Block(b.to_rpc());
                                                     let _ = write_msg(&mut socket, &msg).await;
                                                 }
                                             }
-                                            NodeMessage::Chain(c) => {
+                                            RpcMessage::Chain(c) => {
                                                 let blocks: Vec<Block> = c
                                                     .blocks
                                                     .into_iter()
@@ -702,7 +684,7 @@ impl Node {
                                                     .collect();
                                                 chain.lock().await.replace(blocks);
                                             }
-                                            NodeMessage::Block(b) => {
+                                            RpcMessage::Block(b) => {
                                                 if let Some(block) = Block::from_rpc(b) {
                                                     let mut chain = chain.lock().await;
                                                     if valid_block(&chain, &block) {
@@ -710,7 +692,7 @@ impl Node {
                                                     }
                                                 }
                                             }
-                                            NodeMessage::Handshake(_) => {}
+                                            RpcMessage::Handshake(_) => {}
                                         }
                                     }
                                     Err(_) => break,
@@ -740,11 +722,11 @@ impl Node {
             tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
         })?;
         let mut stream = self.connect_stream(addr).await?;
-        let hs = NodeMessage::Handshake(self.build_handshake());
+        let hs = RpcMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
         let resp = read_msg(&mut stream).await?;
         match resp {
-            NodeMessage::Handshake(h)
+            RpcMessage::Handshake(h)
                 if h.network_id == self.network_id
                     && h.version == self.protocol_version
                     && verify_handshake(&h) => {}
@@ -758,7 +740,7 @@ impl Node {
         if let Ok(peer_addr) = stream.peer_addr() {
             self.peers.lock().await.insert(peer_addr);
         }
-        let get = NodeMessage::GetPeers(GetPeers {});
+        let get = RpcMessage::GetPeers;
         write_msg(&mut stream, &get).await?;
         Ok(())
     }
@@ -772,11 +754,11 @@ impl Node {
             tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
         })?;
         let mut stream = self.connect_stream(addr).await?;
-        let hs = NodeMessage::Handshake(self.build_handshake());
+        let hs = RpcMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
         let resp = read_msg(&mut stream).await?;
         match resp {
-            NodeMessage::Handshake(h)
+            RpcMessage::Handshake(h)
                 if h.network_id == self.network_id
                     && h.version == self.protocol_version
                     && verify_handshake(&h) => {}
@@ -787,10 +769,10 @@ impl Node {
                 ));
             }
         }
-        let get = NodeMessage::GetChain(GetChain {});
+        let get = RpcMessage::GetChain;
         write_msg(&mut stream, &get).await?;
         if let Ok(resp) = read_msg(&mut stream).await {
-            if let NodeMessage::Chain(c) = resp {
+            if let RpcMessage::Chain(c) = resp {
                 let blocks: Vec<Block> = c.blocks.into_iter().filter_map(Block::from_rpc).collect();
                 if Blockchain::validate_chain(&blocks) {
                     let new_diff = Blockchain::total_difficulty_of(&blocks);
@@ -842,7 +824,7 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
     let mut rng = OsRng;
     let sk = secp256k1::SecretKey::new(&mut rng);
     let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-    let hs = NodeMessage::Handshake(Handshake {
+    let hs = RpcMessage::Handshake(Handshake {
         network_id: "coin".into(),
         version: 1,
         public_key: pk.serialize().to_vec(),
@@ -851,7 +833,7 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
     write_msg(&mut stream, &hs).await?;
     let resp = read_msg(&mut stream).await?;
     match resp {
-        NodeMessage::Handshake(h)
+        RpcMessage::Handshake(h)
             if h.network_id == "coin" && h.version == 1 && verify_handshake(&h) => {}
         _ => {
             return Err(tokio::io::Error::new(
@@ -860,7 +842,7 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
             ));
         }
     }
-    let msg = NodeMessage::Transaction(tx_msg.clone());
+    let msg = RpcMessage::Transaction(tx_msg.clone());
     write_msg(&mut stream, &msg).await
 }
 
@@ -961,7 +943,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -969,7 +951,7 @@ mod tests {
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
-        let peers_msg = NodeMessage::Peers(Peers {
+        let peers_msg = RpcMessage::Peers(Peers {
             addrs: vec!["127.0.0.1:12345".into()],
         });
         write_msg(&mut stream, &peers_msg).await.unwrap();
@@ -1175,7 +1157,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1204,7 +1186,7 @@ mod tests {
             },
             transactions: vec![tx],
         };
-        let chain_msg = NodeMessage::Chain(Chain {
+        let chain_msg = RpcMessage::Chain(Chain {
             blocks: vec![block],
         });
         write_msg(&mut stream, &chain_msg).await.unwrap();
@@ -1233,7 +1215,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1257,7 +1239,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let block_msg = NodeMessage::Block(coin_proto::Block {
+        let block_msg = RpcMessage::Block(coin_proto::Block {
             header: coin_proto::BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: merkle,
@@ -1720,7 +1702,7 @@ mod tests {
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let mut sig = sign_handshake(&sk, "coin", 1);
         sig[0] ^= 0x01; // corrupt signature
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1753,7 +1735,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1761,7 +1743,7 @@ mod tests {
         });
         write_msg(&mut stream, &hs).await.unwrap();
         match read_msg(&mut stream).await.unwrap() {
-            NodeMessage::Handshake(_) => {}
+            RpcMessage::Handshake(_) => {}
             other => panic!("expected handshake, got {:?}", other),
         }
         assert_eq!(node.peers().await.len(), 1);
@@ -1789,7 +1771,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1798,7 +1780,7 @@ mod tests {
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
         for _ in 0..6 {
-            let ping = NodeMessage::Ping(Ping {});
+            let ping = RpcMessage::Ping;
             write_msg(&mut stream, &ping).await.unwrap();
         }
         sleep(Duration::from_millis(100)).await;
@@ -1834,7 +1816,7 @@ mod tests {
         let mut rng = OsRng;
         let sk1 = secp256k1::SecretKey::new(&mut rng);
         let pk1 = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk1);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk1.serialize().to_vec(),
@@ -1852,7 +1834,7 @@ mod tests {
         let mut s2 = TcpStream::connect(addr).await.unwrap();
         let sk2 = secp256k1::SecretKey::new(&mut rng);
         let pk2 = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk2);
-        let hs2 = NodeMessage::Handshake(Handshake {
+        let hs2 = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk2.serialize().to_vec(),
@@ -1902,7 +1884,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1911,10 +1893,10 @@ mod tests {
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
 
-        let get = NodeMessage::GetBlock(GetBlock { hash });
+        let get = RpcMessage::GetBlock(GetBlock { hash });
         write_msg(&mut stream, &get).await.unwrap();
         match read_msg(&mut stream).await.unwrap() {
-            NodeMessage::Block(b) => {
+            RpcMessage::Block(b) => {
                 let got = Block::from_rpc(b).unwrap();
                 assert_eq!(got, block);
             }
@@ -1958,7 +1940,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
@@ -1967,7 +1949,7 @@ mod tests {
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
 
-        let get = NodeMessage::GetBlock(GetBlock {
+        let get = RpcMessage::GetBlock(GetBlock {
             hash: "deadbeef".into(),
         });
         write_msg(&mut stream, &get).await.unwrap();
@@ -1997,7 +1979,7 @@ mod tests {
         let mut rng = OsRng;
         let sk = secp256k1::SecretKey::new(&mut rng);
         let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
-        let hs = NodeMessage::Handshake(Handshake {
+        let hs = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: pk.serialize().to_vec(),
