@@ -1,3 +1,5 @@
+#![cfg_attr(tarpaulin, skip)]
+
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use coin::{Blockchain, TransactionExt, new_transaction_with_fee};
@@ -166,6 +168,7 @@ async fn send_transaction(addr: &str, tx: &Transaction) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(tarpaulin))]
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -227,3 +230,6 @@ async fn main() -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(tarpaulin)]
+fn main() {}

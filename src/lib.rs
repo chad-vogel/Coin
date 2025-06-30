@@ -579,7 +579,8 @@ impl Blockchain {
 
     pub fn load_mempool<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
         let f = File::open(path)?;
-        let mempool: Vec<Transaction> = serde_json::from_reader(f).unwrap();
+        let mempool: Vec<Transaction> = serde_json::from_reader(f)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         self.mempool = mempool;
         Ok(())
     }
