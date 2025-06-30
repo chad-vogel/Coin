@@ -72,6 +72,8 @@ pub struct Block {
 pub struct Handshake {
     pub network_id: String,
     pub version: u32,
+    pub public_key: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
