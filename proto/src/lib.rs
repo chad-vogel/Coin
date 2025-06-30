@@ -8,6 +8,22 @@ pub struct Transaction {
     pub fee: u64,
     pub signature: Vec<u8>,
     pub encrypted_message: Vec<u8>,
+    #[serde(default)]
+    pub inputs: Vec<TransactionInput>,
+    #[serde(default)]
+    pub outputs: Vec<TransactionOutput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionInput {
+    pub address: String,
+    pub amount: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionOutput {
+    pub address: String,
+    pub amount: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -86,6 +102,8 @@ mod tests {
             fee: 0,
             signature: vec![],
             encrypted_message: vec![],
+            inputs: vec![],
+            outputs: vec![],
         };
         let data = serde_json::to_vec(&tx).unwrap();
         let decoded: Transaction = serde_json::from_slice(&data).unwrap();
@@ -109,6 +127,8 @@ mod tests {
                 fee: 0,
                 signature: vec![],
                 encrypted_message: vec![],
+                inputs: vec![],
+                outputs: vec![],
             }],
         };
         let data = serde_json::to_vec(&block).unwrap();
