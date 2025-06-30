@@ -18,3 +18,5 @@ peers_file: "peers.txt"
 max_msgs_per_sec: 10
 max_peers: 32
 mining_threads: 1
+# Optional SOCKS5 proxy (Tor). Example: "127.0.0.1:9050"
+tor_proxy: null

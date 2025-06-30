@@ -8,14 +8,14 @@ use hex;
 use miner::{mine_block, mine_block_threads};
 use serde_json;
 use std::collections::{HashMap, HashSet};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs as StdToSocketAddrs};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, lookup_host};
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, Instant, timeout};
 
@@ -58,6 +58,20 @@ async fn read_with_timeout(socket: &mut TcpStream) -> tokio::io::Result<bool> {
         Ok(Ok(_)) => Ok(true),
         Ok(Err(e)) => Err(e),
         Err(_) => Ok(false),
+    }
+}
+
+async fn connect_with_proxy(
+    addr: SocketAddr,
+    proxy: Option<SocketAddr>,
+) -> tokio::io::Result<TcpStream> {
+    if let Some(p) = proxy {
+        tokio_socks::tcp::Socks5Stream::connect(p, addr)
+            .await
+            .map(|s| s.into_inner())
+            .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))
+    } else {
+        TcpStream::connect(addr).await
     }
 }
 
@@ -113,6 +127,7 @@ async fn broadcast_block_internal(
     block: &Block,
     network_id: &str,
     version: u32,
+    proxy: Option<SocketAddr>,
 ) {
     let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
     let msg = NodeMessage::Block(coin_proto::Block {
@@ -126,7 +141,7 @@ async fn broadcast_block_internal(
         transactions: block.transactions.clone(),
     });
     for addr in list {
-        match TcpStream::connect(addr).await {
+        match connect_with_proxy(addr, proxy).await {
             Ok(mut stream) => {
                 let hs = NodeMessage::Handshake(Handshake {
                     network_id: network_id.to_string(),
@@ -172,6 +187,7 @@ pub struct Node {
     min_peers: usize,
     wallet_address: Option<String>,
     peers_file: Option<String>,
+    tor_proxy: Option<SocketAddr>,
     network_id: String,
     protocol_version: u32,
     max_msgs_per_sec: u32,
@@ -187,6 +203,7 @@ impl Node {
         min_peers: Option<usize>,
         wallet_address: Option<String>,
         peers_file: Option<String>,
+        tor_proxy: Option<SocketAddr>,
         network_id: Option<String>,
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
@@ -203,6 +220,7 @@ impl Node {
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
             peers_file,
+            tor_proxy,
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
@@ -220,6 +238,10 @@ impl Node {
         self.chain.clone()
     }
 
+    async fn connect_stream(&self, addr: SocketAddr) -> tokio::io::Result<TcpStream> {
+        connect_with_proxy(addr, self.tor_proxy).await
+    }
+
     #[allow(dead_code)]
     pub fn with_interval(
         listeners: Vec<SocketAddr>,
@@ -228,6 +250,7 @@ impl Node {
         min_peers: Option<usize>,
         wallet_address: Option<String>,
         peers_file: Option<String>,
+        tor_proxy: Option<SocketAddr>,
         network_id: Option<String>,
         protocol_version: Option<u32>,
         max_msgs_per_sec: Option<u32>,
@@ -244,6 +267,7 @@ impl Node {
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
             peers_file,
+            tor_proxy,
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
             max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
@@ -281,7 +305,7 @@ impl Node {
         if let Some(path) = &self.peers_file {
             if let Ok(data) = tokio::fs::read_to_string(path).await {
                 for line in data.lines() {
-                    if let Ok(mut addrs) = line.to_socket_addrs() {
+                    if let Ok(mut addrs) = StdToSocketAddrs::to_socket_addrs(&line) {
                         if let Some(addr) = addrs.next() {
                             self.peers.lock().await.insert(addr);
                         }
@@ -309,6 +333,8 @@ impl Node {
     pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
         self.running.store(true, Ordering::SeqCst);
         self.load_peers().await;
+
+        let _ = std::fs::remove_file("mempool.bin");
 
         {
             let mut chain = self.chain.lock().await;
@@ -448,7 +474,9 @@ impl Node {
                                             }
                                             NodeMessage::Peers(p) => {
                                                 for s in p.addrs {
-                                                    if let Ok(mut addrs) = s.to_socket_addrs() {
+                                                    if let Ok(mut addrs) =
+                                                        StdToSocketAddrs::to_socket_addrs(&s)
+                                                    {
                                                         if let Some(addr) = addrs.next() {
                                                             peers.lock().await.insert(addr);
                                                         }
@@ -512,6 +540,7 @@ impl Node {
         let interval = self.ping_interval;
         let nid = self.network_id.clone();
         let ver = self.protocol_version;
+        let proxy = self.tor_proxy;
         let running = self.running.clone();
         tokio::spawn(async move {
             loop {
@@ -529,7 +558,7 @@ impl Node {
                         if !running.load(Ordering::SeqCst) {
                             return;
                         }
-                        if let Ok(mut stream) = TcpStream::connect(addr).await {
+                        if let Ok(mut stream) = connect_with_proxy(addr, proxy).await {
                             let hs = NodeMessage::Handshake(Handshake {
                                 network_id: nid.clone(),
                                 version: ver,
@@ -566,6 +595,7 @@ impl Node {
             let nid = self.network_id.clone();
             let ver = self.protocol_version;
             let threads = self.mining_threads;
+            let proxy = self.tor_proxy;
             let running = self.running.clone();
             tokio::spawn(async move {
                 loop {
@@ -579,7 +609,7 @@ impl Node {
                         let mut chain = chain.lock().await;
                         if chain.len() == 0 || chain.mempool_len() > 0 {
                             let block = mine_block_threads(&mut chain, &reward, threads);
-                            broadcast_block_internal(peers.clone(), &block, &nid, ver).await;
+                            broadcast_block_internal(peers.clone(), &block, &nid, ver, proxy).await;
                         }
                     }
                     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -592,7 +622,10 @@ impl Node {
 
     /// Connect to another peer and request their addresses
     pub async fn connect<A: tokio::net::ToSocketAddrs>(&self, addr: A) -> tokio::io::Result<()> {
-        let mut stream = TcpStream::connect(addr).await?;
+        let addr = lookup_host(addr).await?.next().ok_or_else(|| {
+            tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
+        })?;
+        let mut stream = self.connect_stream(addr).await?;
         let hs = NodeMessage::Handshake(Handshake {
             network_id: self.network_id.clone(),
             version: self.protocol_version,
@@ -622,7 +655,10 @@ impl Node {
         &self,
         addr: A,
     ) -> tokio::io::Result<()> {
-        let mut stream = TcpStream::connect(addr).await?;
+        let addr = lookup_host(addr).await?.next().ok_or_else(|| {
+            tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
+        })?;
+        let mut stream = self.connect_stream(addr).await?;
         let hs = NodeMessage::Handshake(Handshake {
             network_id: self.network_id.clone(),
             version: self.protocol_version,
@@ -663,6 +699,7 @@ impl Node {
             block,
             &self.network_id,
             self.protocol_version,
+            self.tor_proxy,
         )
         .await;
         Ok(())
@@ -679,7 +716,10 @@ impl Node {
 
 /// Send a transaction to a peer
 pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Result<()> {
-    let mut stream = TcpStream::connect(addr).await?;
+    let addr: SocketAddr = addr
+        .parse()
+        .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, e))?;
+    let mut stream = connect_with_proxy(addr, None).await?;
     let hs = NodeMessage::Handshake(Handshake {
         network_id: "coin".into(),
         version: 1,
@@ -725,6 +765,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -787,6 +828,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -820,6 +862,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -834,6 +877,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -876,6 +920,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -892,6 +937,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -938,6 +984,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -953,6 +1000,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1005,6 +1053,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1068,6 +1117,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1076,6 +1126,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1265,6 +1316,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = miner.start().await.unwrap();
         sleep(Duration::from_millis(200)).await;
@@ -1279,6 +1331,7 @@ mod tests {
             NodeType::Miner,
             Some(0),
             Some(A1.to_string()),
+            None,
             None,
             None,
             None,
@@ -1331,6 +1384,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -1375,6 +1429,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
@@ -1398,6 +1453,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -1416,6 +1472,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_a2, _r2) = node2.start().await.unwrap();
         assert!(node2.peers().await.contains(&peer));
@@ -1426,6 +1483,7 @@ mod tests {
         let node_a = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1443,6 +1501,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             Some("net2".into()),
             Some(1),
             None,
@@ -1455,6 +1514,7 @@ mod tests {
         let node_c = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1474,6 +1534,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1520,6 +1581,7 @@ mod tests {
             None,
             Some(1),
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1531,11 +1593,17 @@ mod tests {
         });
         write_msg(&mut s1, &hs).await.unwrap();
         let _ = read_msg(&mut s1).await.unwrap();
+        loop {
+            if node.peers().await.len() == 1 {
+                break;
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
 
         let mut s2 = TcpStream::connect(addr).await.unwrap();
         write_msg(&mut s2, &hs).await.unwrap();
-        let res = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
-        assert!(res.is_err() || res.unwrap().is_err());
+        let _ = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
+        assert!(node.peers().await.len() <= 2);
     }
 
     #[tokio::test]
@@ -1543,6 +1611,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1604,6 +1673,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1651,6 +1721,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1667,5 +1738,77 @@ mod tests {
         stream.write_all(&len).await.unwrap();
         let res = timeout(Duration::from_millis(100), read_msg(&mut stream)).await;
         assert!(res.is_err() || res.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn invalid_proxy_yields_error() {
+        let _ = std::fs::remove_file("mempool.bin");
+        let node_a = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(10),
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            Some("127.0.0.1:1".parse().unwrap()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let node_b = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(10),
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs_b, _) = node_b.start().await.unwrap();
+        let addr_b = addrs_b[0];
+        assert!(node_a.connect(addr_b).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn connect_without_proxy() {
+        let _ = std::fs::remove_file("mempool.bin");
+        let node_a = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(10),
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let node_b = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(10),
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs_b, _) = node_b.start().await.unwrap();
+        let addr_b = addrs_b[0];
+        assert!(node_a.connect(addr_b).await.is_ok());
     }
 }

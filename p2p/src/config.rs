@@ -23,6 +23,8 @@ pub struct Config {
     pub seed_peers: Vec<String>,
     #[serde(default = "default_peers_file")]
     pub peers_file: String,
+    #[serde(default)]
+    pub tor_proxy: Option<String>,
     #[serde(default = "default_network_id")]
     pub network_id: String,
     #[serde(default = "default_protocol_version")]
@@ -109,5 +111,6 @@ peers_file: "p.txt"
         assert_eq!(cfg.max_msgs_per_sec, 10);
         assert_eq!(cfg.max_peers, 32);
         assert!(cfg.mining_threads >= 1);
+        assert!(cfg.tor_proxy.is_none());
     }
 }
