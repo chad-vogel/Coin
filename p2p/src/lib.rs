@@ -7,9 +7,9 @@ use coin_proto::{
 use hex;
 use miner::{mine_block, mine_block_threads};
 use rand::rngs::OsRng;
-use sha2::Digest;
 use secp256k1::{self, Secp256k1};
 use serde_json;
+use sha2::Digest;
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs as StdToSocketAddrs};
 use std::sync::{
@@ -409,9 +409,13 @@ impl Node {
     }
 
     async fn restore_mempool(&self) {
-        let _ = std::fs::remove_file("mempool.bin");
-        let mut chain = self.chain.lock().await;
-        let _ = chain.load_mempool("mempool.bin");
+        let path = std::path::Path::new("mempool.bin");
+        if path.exists() {
+            let mut chain = self.chain.lock().await;
+            if chain.load_mempool(path).is_ok() {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 
     fn spawn_mempool_saver(&self) {
@@ -2045,5 +2049,33 @@ mod tests {
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
         assert!(node_a.connect(addr_b).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mempool_file_restored_on_start() {
+        let _ = std::fs::remove_file("mempool.bin");
+        {
+            let mut chain = Blockchain::new();
+            chain.add_transaction(coinbase_transaction(A1, 5));
+            chain.save_mempool("mempool.bin").unwrap();
+        }
+
+        let node = Node::with_interval(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            Duration::from_millis(10),
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (_addrs, _) = node.start().await.unwrap();
+        assert_eq!(node.chain.lock().await.mempool_len(), 1);
+        assert!(!std::path::Path::new("mempool.bin").exists());
     }
 }
