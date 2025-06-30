@@ -34,7 +34,7 @@ pub struct Config {
 }
 
 fn default_chain_file() -> String {
-    "chain.bin".to_string()
+    "blocks/blockchain.dat".to_string()
 }
 
 fn default_network_id() -> String {
