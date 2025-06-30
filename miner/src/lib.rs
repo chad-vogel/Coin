@@ -130,8 +130,8 @@ mod tests {
 
     #[test]
     fn difficulty_check() {
-        assert!(meets_difficulty(&[0, 0, 1], 2));
-        assert!(!meets_difficulty(&[0, 1], 2));
+        assert!(meets_difficulty(&[0x00, 0x7F], 9));
+        assert!(!meets_difficulty(&[0x00, 0x7F], 10));
     }
 
     #[test]
