@@ -10,14 +10,19 @@ use std::sync::{
 };
 use std::thread;
 
-fn hash_bytes(block: &Block) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(block.header.previous_hash.as_bytes());
-    hasher.update(block.header.merkle_root.as_bytes());
-    hasher.update(block.header.timestamp.to_be_bytes());
-    hasher.update(block.header.nonce.to_be_bytes());
-    hasher.update(block.header.difficulty.to_be_bytes());
-    let result = hasher.finalize();
+fn header_bytes(header: &BlockHeader) -> (Vec<u8>, usize) {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(header.previous_hash.as_bytes());
+    bytes.extend_from_slice(header.merkle_root.as_bytes());
+    bytes.extend_from_slice(&header.timestamp.to_be_bytes());
+    let nonce_pos = bytes.len();
+    bytes.extend_from_slice(&header.nonce.to_be_bytes());
+    bytes.extend_from_slice(&header.difficulty.to_be_bytes());
+    (bytes, nonce_pos)
+}
+
+fn hash_bytes(buf: &[u8]) -> [u8; 32] {
+    let result = Sha256::digest(buf);
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&result);
     arr
@@ -33,19 +38,11 @@ pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
         .insert(0, coinbase_transaction(miner.to_string(), reward));
     block.header.merkle_root = compute_merkle_root(&block.transactions);
     block.header.difficulty = difficulty;
+
+    let (mut header_bytes, nonce_pos) = header_bytes(&block.header);
     loop {
-        let hash = {
-            let mut hasher = Sha256::new();
-            hasher.update(block.header.previous_hash.as_bytes());
-            hasher.update(block.header.merkle_root.as_bytes());
-            hasher.update(block.header.timestamp.to_be_bytes());
-            hasher.update(block.header.nonce.to_be_bytes());
-            hasher.update(block.header.difficulty.to_be_bytes());
-            for tx in &block.transactions {
-                hasher.update(tx.hash());
-            }
-            hasher.finalize()
-        };
+        header_bytes[nonce_pos..nonce_pos + 8].copy_from_slice(&block.header.nonce.to_be_bytes());
+        let hash = hash_bytes(&header_bytes);
         if meets_difficulty(&hash, difficulty) {
             break;
         }
@@ -79,8 +76,11 @@ pub fn mine_block_threads(chain: &mut Blockchain, miner: &str, threads: usize) -
         let found_cl = found.clone();
         let res_cl = result.clone();
         handles.push(thread::spawn(move || {
+            let (mut header_bytes, nonce_pos) = header_bytes(&block.header);
             while !found_cl.load(Ordering::Relaxed) {
-                let hash = hash_bytes(&block);
+                header_bytes[nonce_pos..nonce_pos + 8]
+                    .copy_from_slice(&block.header.nonce.to_be_bytes());
+                let hash = hash_bytes(&header_bytes);
                 if meets_difficulty(&hash, difficulty) {
                     let mut out = res_cl.lock().unwrap();
                     if !found_cl.swap(true, Ordering::Relaxed) {
@@ -146,6 +146,7 @@ mod tests {
         let block = mine_block(&mut bc, A1);
         assert!(bc.len() > len_before);
         let hash = hex::decode(block.hash()).unwrap();
+        assert!(meets_difficulty(&hash, difficulty));
     }
 
     #[test]
