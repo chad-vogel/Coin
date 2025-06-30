@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let node = Node::new(
         cfg.listener_addrs(),
         cfg.node_type,
-        Some(cfg.min_peers),
+        None,
         cfg.wallet_address.clone(),
         None,
         tor_proxy,

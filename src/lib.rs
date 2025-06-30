@@ -62,9 +62,13 @@ pub fn new_transaction_with_fee(
     amount: u64,
     fee: u64,
 ) -> Transaction {
+    let sender = sender.into();
+    let recipient = recipient.into();
+    assert!(valid_address(&sender));
+    assert!(valid_address(&recipient));
     Transaction {
-        sender: sender.into(),
-        recipient: recipient.into(),
+        sender,
+        recipient,
         amount,
         fee,
         signature: Vec::new(),
@@ -87,6 +91,8 @@ pub fn new_multi_transaction_with_fee(
     outputs: Vec<(String, u64)>,
     fee: u64,
 ) -> Transaction {
+    let sender = sender.into();
+    assert!(valid_address(&sender));
     let recipient = outputs.first().map(|o| o.0.clone()).unwrap_or_default();
     let amount = outputs.first().map(|o| o.1).unwrap_or(0);
     let extra: Vec<_> = outputs
@@ -97,8 +103,12 @@ pub fn new_multi_transaction_with_fee(
             amount: amt,
         })
         .collect();
+    assert!(valid_address(&recipient));
+    for out in &extra {
+        assert!(valid_address(&out.address));
+    }
     Transaction {
-        sender: sender.into(),
+        sender,
         recipient,
         amount,
         fee,
@@ -111,9 +121,11 @@ pub fn new_multi_transaction_with_fee(
 
 /// Create a coinbase transaction paying `amount` to `miner`
 pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transaction {
+    let miner = miner.into();
+    assert!(valid_address(&miner));
     Transaction {
         sender: String::new(),
-        recipient: miner.into(),
+        recipient: miner,
         amount,
         fee: 0,
         signature: Vec::new(),
@@ -157,9 +169,13 @@ pub fn new_transaction_with_message(
     sender_sk: &secp256k1::SecretKey,
     recipient_pk: &secp256k1::PublicKey,
 ) -> Transaction {
+    let sender = sender.into();
+    let recipient = recipient.into();
+    assert!(valid_address(&sender));
+    assert!(valid_address(&recipient));
     Transaction {
-        sender: sender.into(),
-        recipient: recipient.into(),
+        sender,
+        recipient,
         amount,
         fee,
         signature: Vec::new(),
@@ -702,9 +718,24 @@ mod tests {
     #[test]
     fn reject_invalid_transaction() {
         let mut bc = Blockchain::new();
-        let tx = new_transaction("badaddr", A2, 1);
+        let tx = Transaction {
+            sender: "badaddr".into(),
+            recipient: A2.into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
         assert!(!bc.add_transaction(tx));
         assert_eq!(bc.mempool_len(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn new_transaction_invalid_sender_panics() {
+        let _ = new_transaction("badaddr", A2, 1);
     }
 
     #[test]
@@ -935,6 +966,19 @@ mod tests {
         );
         let tx = new_transaction_with_message(A1, A2, 5, 0, "secret", &sk_sender, &pk_recipient);
         assert!(!tx.encrypted_message.is_empty());
+    }
+
+    #[test]
+    #[should_panic]
+    fn new_transaction_with_message_invalid_recipient() {
+        let secp = secp256k1::Secp256k1::new();
+        let sk_sender = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let pk_recipient = secp256k1::PublicKey::from_secret_key(
+            &secp,
+            &secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap(),
+        );
+        let _ =
+            new_transaction_with_message(A1, "badaddr", 5, 0, "secret", &sk_sender, &pk_recipient);
     }
 
     #[test]
