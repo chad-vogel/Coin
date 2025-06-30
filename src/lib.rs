@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod blockfile;
 pub mod utils;
 pub use utils::meets_difficulty;
 
@@ -274,7 +275,7 @@ impl TransactionExt for Transaction {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BlockHeader {
     pub previous_hash: String,
     pub merkle_root: String,
@@ -283,7 +284,7 @@ pub struct BlockHeader {
     pub difficulty: u32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Block {
     pub header: BlockHeader,
     pub transactions: Vec<Transaction>,
