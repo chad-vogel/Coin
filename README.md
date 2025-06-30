@@ -9,13 +9,17 @@ Each coin is divisible into 100&nbsp;000&nbsp;000 units allowing for very small 
 Blocks contain a header and a list of transactions. The header stores:
 
 - `previous_hash` – SHA256 hash of the preceding block
-- `merkle_root` – hash of all transactions in the block
+- `merkle_root` – root of a Merkle tree over all transactions
 - `timestamp` – seconds since the Unix epoch
 - `nonce` – value modified by miners to satisfy difficulty
 - `difficulty` – number of leading zero bits required in the block hash
 
 The main crate exposes helper methods for constructing transactions and
 calculating block hashes.
+
+Old blocks can prune stored transactions once they are buried under enough
+confirmations. Because only the Merkle root is included in the block hash,
+discarding transaction data does not invalidate the chain.
 
 ## Mining Protocol
 
