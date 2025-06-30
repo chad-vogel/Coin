@@ -6,6 +6,9 @@ use coin_proto::{
 };
 use hex;
 use miner::{mine_block, mine_block_threads};
+use rand::rngs::OsRng;
+use sha2::Digest;
+use secp256k1::{self, Secp256k1};
 use serde_json;
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs as StdToSocketAddrs};
@@ -75,6 +78,69 @@ async fn connect_with_proxy(
     }
 }
 
+fn load_or_create_key(path: &str) -> (secp256k1::SecretKey, secp256k1::PublicKey) {
+    if let Ok(data) = std::fs::read(path) {
+        if data.len() == 32 {
+            if let Ok(sk) = secp256k1::SecretKey::from_slice(&data) {
+                let secp = Secp256k1::new();
+                let pk = secp256k1::PublicKey::from_secret_key(&secp, &sk);
+                return (sk, pk);
+            }
+        }
+    }
+    let mut rng = OsRng;
+    let sk = secp256k1::SecretKey::new(&mut rng);
+    let secp = Secp256k1::new();
+    let pk = secp256k1::PublicKey::from_secret_key(&secp, &sk);
+    let _ = std::fs::write(path, sk.secret_bytes());
+    (sk, pk)
+}
+
+fn sign_handshake(sk: &secp256k1::SecretKey, network_id: &str, version: u32) -> Vec<u8> {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(network_id.as_bytes());
+    hasher.update(version.to_be_bytes());
+    let hash = hasher.finalize();
+    let secp = Secp256k1::new();
+    let msg = secp256k1::Message::from_slice(&hash).expect("32 bytes");
+    let sig = secp.sign_ecdsa_recoverable(&msg, sk);
+    let (rec_id, data) = sig.serialize_compact();
+    let mut out = Vec::with_capacity(65);
+    out.push(rec_id.to_i32() as u8);
+    out.extend_from_slice(&data);
+    out
+}
+
+fn verify_handshake(h: &Handshake) -> bool {
+    if h.public_key.len() != 33 || h.signature.len() != 65 {
+        return false;
+    }
+    let pk = match secp256k1::PublicKey::from_slice(&h.public_key) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let rec_id = match secp256k1::ecdsa::RecoveryId::from_i32(h.signature[0] as i32) {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+    let mut data = [0u8; 64];
+    data.copy_from_slice(&h.signature[1..]);
+    let sig = match secp256k1::ecdsa::RecoverableSignature::from_compact(&data, rec_id) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(h.network_id.as_bytes());
+    hasher.update(h.version.to_be_bytes());
+    let hash = hasher.finalize();
+    let msg = secp256k1::Message::from_slice(&hash).expect("32 bytes");
+    let secp = Secp256k1::new();
+    match secp.recover_ecdsa(&msg, &sig) {
+        Ok(p) => p == pk,
+        Err(_) => false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum, serde::Deserialize)]
 pub enum NodeType {
     Wallet,
@@ -127,6 +193,8 @@ async fn broadcast_block_internal(
     block: &Block,
     network_id: &str,
     version: u32,
+    sk: &secp256k1::SecretKey,
+    pk: &secp256k1::PublicKey,
     proxy: Option<SocketAddr>,
 ) {
     let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
@@ -146,6 +214,8 @@ async fn broadcast_block_internal(
                 let hs = NodeMessage::Handshake(Handshake {
                     network_id: network_id.to_string(),
                     version,
+                    public_key: pk.serialize().to_vec(),
+                    signature: sign_handshake(sk, network_id, version),
                 });
                 if write_msg(&mut stream, &hs).await.is_err() {
                     peers.lock().await.remove(&addr);
@@ -154,7 +224,9 @@ async fn broadcast_block_internal(
                 if let Ok(resp) = read_msg(&mut stream).await {
                     match resp {
                         NodeMessage::Handshake(h)
-                            if h.network_id == network_id && h.version == version => {}
+                            if h.network_id == network_id
+                                && h.version == version
+                                && verify_handshake(&h) => {}
                         _ => {
                             peers.lock().await.remove(&addr);
                             continue;
@@ -193,6 +265,9 @@ pub struct Node {
     max_msgs_per_sec: u32,
     max_peers: usize,
     mining_threads: usize,
+    node_key: secp256k1::SecretKey,
+    node_pub: secp256k1::PublicKey,
+    key_file: String,
     running: Arc<AtomicBool>,
 }
 
@@ -210,6 +285,7 @@ impl Node {
         max_peers: Option<usize>,
         mining_threads: Option<usize>,
     ) -> Self {
+        let (node_key, node_pub) = load_or_create_key("node.key");
         Self {
             listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
@@ -230,6 +306,9 @@ impl Node {
                     .map(|n| n.get())
                     .unwrap_or(1)
             }),
+            node_key,
+            node_pub,
+            key_file: "node.key".to_string(),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -257,6 +336,7 @@ impl Node {
         max_peers: Option<usize>,
         mining_threads: Option<usize>,
     ) -> Self {
+        let (node_key, node_pub) = load_or_create_key("node.key");
         Self {
             listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
@@ -277,6 +357,9 @@ impl Node {
                     .map(|n| n.get())
                     .unwrap_or(1)
             }),
+            node_key,
+            node_pub,
+            key_file: "node.key".to_string(),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -291,6 +374,15 @@ impl Node {
 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    fn build_handshake(&self) -> Handshake {
+        Handshake {
+            network_id: self.network_id.clone(),
+            version: self.protocol_version,
+            public_key: self.node_pub.serialize().to_vec(),
+            signature: sign_handshake(&self.node_key, &self.network_id, self.protocol_version),
+        }
     }
 
     pub async fn status(&self) -> (usize, usize, usize) {
@@ -342,6 +434,8 @@ impl Node {
         let nid = self.network_id.clone();
         let ver = self.protocol_version;
         let proxy = self.tor_proxy;
+        let key = self.node_key.clone();
+        let pubk = self.node_pub.clone();
         let running = self.running.clone();
         tokio::spawn(async move {
             loop {
@@ -355,6 +449,8 @@ impl Node {
                     let nid = nid.clone();
                     let ver = ver;
                     let running = running.clone();
+                    let key = key.clone();
+                    let pubk = pubk.clone();
                     tokio::spawn(async move {
                         if !running.load(Ordering::SeqCst) {
                             return;
@@ -363,10 +459,13 @@ impl Node {
                             let hs = NodeMessage::Handshake(Handshake {
                                 network_id: nid.clone(),
                                 version: ver,
+                                public_key: pubk.serialize().to_vec(),
+                                signature: sign_handshake(&key, &nid, ver),
                             });
                             if write_msg(&mut stream, &hs).await.is_ok() {
                                 if let Ok(resp) = read_msg(&mut stream).await {
-                                    if matches!(resp, NodeMessage::Handshake(_)) {
+                                    if matches!(resp, NodeMessage::Handshake(h) if verify_handshake(&h))
+                                    {
                                         let ping = NodeMessage::Ping(Ping {});
                                         if write_msg(&mut stream, &ping).await.is_ok() {
                                             match read_with_timeout(&mut stream).await {
@@ -398,6 +497,8 @@ impl Node {
         let ver = self.protocol_version;
         let threads = self.mining_threads;
         let proxy = self.tor_proxy;
+        let node_key = self.node_key.clone();
+        let node_pub = self.node_pub.clone();
         let running = self.running.clone();
         tokio::spawn(async move {
             loop {
@@ -411,7 +512,16 @@ impl Node {
                     let mut chain = chain.lock().await;
                     if chain.len() == 0 || chain.mempool_len() > 0 {
                         let block = mine_block_threads(&mut chain, &reward, threads);
-                        broadcast_block_internal(peers.clone(), &block, &nid, ver, proxy).await;
+                        broadcast_block_internal(
+                            peers.clone(),
+                            &block,
+                            &nid,
+                            ver,
+                            &node_key,
+                            &node_pub,
+                            proxy,
+                        )
+                        .await;
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -441,6 +551,8 @@ impl Node {
         let max_peers = self.max_peers;
         let network_id = self.network_id.clone();
         let protocol_version = self.protocol_version;
+        let key = self.node_key.clone();
+        let pubk = self.node_pub.clone();
 
         // accept loop for each listener
         for listener in listeners {
@@ -453,6 +565,8 @@ impl Node {
             let max = max;
             let cap = max_peers;
             let running = self.running.clone();
+            let key = key.clone();
+            let pubk = pubk.clone();
             tokio::spawn(async move {
                 loop {
                     if !running.load(Ordering::SeqCst) {
@@ -480,7 +594,8 @@ impl Node {
                                 Err(_) => return,
                             };
                             if let NodeMessage::Handshake(h) = msg {
-                                if h.network_id != nid || h.version != ver {
+                                if h.network_id != nid || h.version != ver || !verify_handshake(&h)
+                                {
                                     return;
                                 }
                             } else {
@@ -498,6 +613,8 @@ impl Node {
                             let resp = NodeMessage::Handshake(Handshake {
                                 network_id: nid.clone(),
                                 version: ver,
+                                public_key: pubk.serialize().to_vec(),
+                                signature: sign_handshake(&key, &nid, ver),
                             });
                             if write_msg(&mut socket, &resp).await.is_err() {
                                 return;
@@ -620,15 +737,14 @@ impl Node {
             tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
         })?;
         let mut stream = self.connect_stream(addr).await?;
-        let hs = NodeMessage::Handshake(Handshake {
-            network_id: self.network_id.clone(),
-            version: self.protocol_version,
-        });
+        let hs = NodeMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
         let resp = read_msg(&mut stream).await?;
         match resp {
             NodeMessage::Handshake(h)
-                if h.network_id == self.network_id && h.version == self.protocol_version => {}
+                if h.network_id == self.network_id
+                    && h.version == self.protocol_version
+                    && verify_handshake(&h) => {}
             _ => {
                 return Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::InvalidData,
@@ -653,15 +769,14 @@ impl Node {
             tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, "invalid address")
         })?;
         let mut stream = self.connect_stream(addr).await?;
-        let hs = NodeMessage::Handshake(Handshake {
-            network_id: self.network_id.clone(),
-            version: self.protocol_version,
-        });
+        let hs = NodeMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
         let resp = read_msg(&mut stream).await?;
         match resp {
             NodeMessage::Handshake(h)
-                if h.network_id == self.network_id && h.version == self.protocol_version => {}
+                if h.network_id == self.network_id
+                    && h.version == self.protocol_version
+                    && verify_handshake(&h) => {}
             _ => {
                 return Err(tokio::io::Error::new(
                     tokio::io::ErrorKind::InvalidData,
@@ -693,6 +808,8 @@ impl Node {
             block,
             &self.network_id,
             self.protocol_version,
+            &self.node_key,
+            &self.node_pub,
             self.tor_proxy,
         )
         .await;
@@ -714,14 +831,20 @@ pub async fn send_transaction(addr: &str, tx_msg: &Transaction) -> tokio::io::Re
         .parse()
         .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidInput, e))?;
     let mut stream = connect_with_proxy(addr, None).await?;
+    let mut rng = OsRng;
+    let sk = secp256k1::SecretKey::new(&mut rng);
+    let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
     let hs = NodeMessage::Handshake(Handshake {
         network_id: "coin".into(),
         version: 1,
+        public_key: pk.serialize().to_vec(),
+        signature: sign_handshake(&sk, "coin", 1),
     });
     write_msg(&mut stream, &hs).await?;
     let resp = read_msg(&mut stream).await?;
     match resp {
-        NodeMessage::Handshake(h) if h.network_id == "coin" && h.version == 1 => {}
+        NodeMessage::Handshake(h)
+            if h.network_id == "coin" && h.version == 1 && verify_handshake(&h) => {}
         _ => {
             return Err(tokio::io::Error::new(
                 tokio::io::ErrorKind::InvalidData,
@@ -827,9 +950,14 @@ mod tests {
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1007,9 +1135,14 @@ mod tests {
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1060,9 +1193,14 @@ mod tests {
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1523,6 +1661,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_signature_disconnects() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+        let mut sig = sign_handshake(&sk, "coin", 1);
+        sig[0] ^= 0x01; // corrupt signature
+        let hs = NodeMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sig,
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let res = timeout(Duration::from_millis(100), read_msg(&mut stream)).await;
+        assert!(res.is_err() || res.unwrap().is_err());
+        assert!(node.peers().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn valid_signature_allows_connection() {
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+        let hs = NodeMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        match read_msg(&mut stream).await.unwrap() {
+            NodeMessage::Handshake(_) => {}
+            other => panic!("expected handshake, got {:?}", other),
+        }
+        assert_eq!(node.peers().await.len(), 1);
+    }
+
+    #[tokio::test]
     async fn rate_limit_disconnects_spammy_peer() {
         let node = Node::with_interval(
             vec!["0.0.0.0:0".parse().unwrap()],
@@ -1541,9 +1749,14 @@ mod tests {
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1581,9 +1794,14 @@ mod tests {
         let addr = addrs[0];
 
         let mut s1 = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk1 = secp256k1::SecretKey::new(&mut rng);
+        let pk1 = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk1);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk1.serialize().to_vec(),
+            signature: sign_handshake(&sk1, "coin", 1),
         });
         write_msg(&mut s1, &hs).await.unwrap();
         let _ = read_msg(&mut s1).await.unwrap();
@@ -1595,7 +1813,15 @@ mod tests {
         }
 
         let mut s2 = TcpStream::connect(addr).await.unwrap();
-        write_msg(&mut s2, &hs).await.unwrap();
+        let sk2 = secp256k1::SecretKey::new(&mut rng);
+        let pk2 = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk2);
+        let hs2 = NodeMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk2.serialize().to_vec(),
+            signature: sign_handshake(&sk2, "coin", 1),
+        });
+        write_msg(&mut s2, &hs2).await.unwrap();
         let _ = timeout(Duration::from_millis(100), read_msg(&mut s2)).await;
         assert!(node.peers().await.len() <= 2);
     }
@@ -1636,9 +1862,14 @@ mod tests {
         };
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1687,9 +1918,14 @@ mod tests {
         }
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
@@ -1721,9 +1957,14 @@ mod tests {
         let addr = addrs[0];
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
         let hs = NodeMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
         });
         write_msg(&mut stream, &hs).await.unwrap();
         let _ = read_msg(&mut stream).await.unwrap();
