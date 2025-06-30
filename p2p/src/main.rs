@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use coin::Blockchain;
-use coin_p2p::{Node, NodeType, config::Config};
+use coin_p2p::{Node, config::Config};
 use std::io::{self, Write};
 use tokio::time::{Duration, sleep};
 
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         cfg.node_type,
         Some(cfg.min_peers),
         cfg.wallet_address.clone(),
-        Some(cfg.peers_file.clone()),
+        None,
         tor_proxy,
         Some(cfg.network_id.clone()),
         Some(cfg.protocol_version),

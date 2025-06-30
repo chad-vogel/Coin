@@ -186,7 +186,7 @@ pub struct Node {
     chain: Arc<Mutex<Blockchain>>,
     min_peers: usize,
     wallet_address: Option<String>,
-    peers_file: Option<String>,
+    peers_file: String,
     tor_proxy: Option<SocketAddr>,
     network_id: String,
     protocol_version: u32,
@@ -219,7 +219,7 @@ impl Node {
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
-            peers_file,
+            peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
             tor_proxy,
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
@@ -266,7 +266,7 @@ impl Node {
             chain: Arc::new(Mutex::new(Blockchain::new())),
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
-            peers_file,
+            peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
             tor_proxy,
             network_id: network_id.unwrap_or_else(|| "coin".to_string()),
             protocol_version: protocol_version.unwrap_or(1),
@@ -302,31 +302,18 @@ impl Node {
     }
 
     async fn load_peers(&self) {
-        if let Some(path) = &self.peers_file {
-            if let Ok(data) = tokio::fs::read_to_string(path).await {
-                for line in data.lines() {
-                    if let Ok(mut addrs) = StdToSocketAddrs::to_socket_addrs(&line) {
-                        if let Some(addr) = addrs.next() {
-                            self.peers.lock().await.insert(addr);
-                        }
-                    }
-                }
+        if let Ok(data) = tokio::fs::read(&self.peers_file).await {
+            if let Ok(list) = bincode::deserialize::<Vec<SocketAddr>>(&data) {
+                self.peers.lock().await.extend(list);
             }
         }
     }
 
     pub async fn save_peers(&self) -> tokio::io::Result<()> {
-        if let Some(path) = &self.peers_file {
-            let list: Vec<String> = self
-                .peers
-                .lock()
-                .await
-                .iter()
-                .map(|a| a.to_string())
-                .collect();
-            tokio::fs::write(path, list.join("\n")).await?;
-        }
-        Ok(())
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().cloned().collect();
+        let data = bincode::serialize(&list)
+            .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::Other, e))?;
+        tokio::fs::write(&self.peers_file, data).await
     }
 
     async fn restore_mempool(&self) {

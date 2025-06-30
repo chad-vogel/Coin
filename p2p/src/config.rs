@@ -15,14 +15,12 @@ pub struct Config {
     pub listeners: Vec<Listener>,
     pub wallet_address: Option<String>,
     pub node_type: NodeType,
-    #[serde(default)]
+    #[serde(default = "default_min_peers")]
     pub min_peers: usize,
     #[serde(default = "default_chain_file")]
     pub chain_file: String,
     #[serde(default)]
     pub seed_peers: Vec<String>,
-    #[serde(default = "default_peers_file")]
-    pub peers_file: String,
     #[serde(default)]
     pub tor_proxy: Option<String>,
     #[serde(default = "default_network_id")]
@@ -41,8 +39,8 @@ fn default_chain_file() -> String {
     "chain.bin".to_string()
 }
 
-fn default_peers_file() -> String {
-    "peers.txt".to_string()
+fn default_min_peers() -> usize {
+    1
 }
 
 fn default_network_id() -> String {
@@ -76,7 +74,13 @@ impl Config {
     pub fn listener_addrs(&self) -> Vec<SocketAddr> {
         self.listeners
             .iter()
-            .filter_map(|l| format!("{}:{}", l.ip, l.port).parse().ok())
+            .filter_map(|l| {
+                if l.ip.contains(':') {
+                    format!("[{}]:{}", l.ip, l.port).parse().ok()
+                } else {
+                    format!("{}:{}", l.ip, l.port).parse().ok()
+                }
+            })
             .collect()
     }
 
@@ -101,16 +105,29 @@ listeners:
 node_type: Wallet
 seed_peers:
   - "127.0.0.1:9000"
-peers_file: "p.txt"
 "#;
         let cfg: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(cfg.seed_peers, vec!["127.0.0.1:9000".to_string()]);
-        assert_eq!(cfg.peers_file, "p.txt");
         assert_eq!(cfg.network_id, "coin");
         assert_eq!(cfg.protocol_version, 1);
         assert_eq!(cfg.max_msgs_per_sec, 10);
         assert_eq!(cfg.max_peers, 32);
         assert!(cfg.mining_threads >= 1);
         assert!(cfg.tor_proxy.is_none());
+    }
+
+    #[test]
+    fn ipv6_listener_parses() {
+        let yaml = r#"
+listeners:
+  - ip: "::1"
+    port: 9000
+node_type: Wallet
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        let addrs = cfg.listener_addrs();
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0].port(), 9000);
+        assert!(addrs[0].is_ipv6());
     }
 }
