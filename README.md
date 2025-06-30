@@ -87,6 +87,19 @@ Field descriptions:
 - `seed_peers` – peers contacted on startup for bootstrapping.
 - `peers_file` – file for persisting discovered peers.
 
+## Tor Usage
+
+Nodes can route outbound connections through a SOCKS5 proxy such as the one
+provided by a local Tor daemon. Start Tor locally and set `tor_proxy` either in
+`config.yaml` or via `--tor-proxy` when running `coin-p2p`:
+
+```bash
+tor &
+cargo run -p coin-p2p -- --tor-proxy 127.0.0.1:9050
+```
+
+Transactions and block requests will then be tunneled through Tor.
+
 ## Wallet Basics
 
 The `coin-wallet` crate offers a BIP32 HD wallet implementation.

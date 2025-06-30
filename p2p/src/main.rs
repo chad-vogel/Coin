@@ -9,6 +9,8 @@ use tokio::time::{Duration, sleep};
 struct Args {
     #[arg(long, default_value = "config.yaml")]
     config: String,
+    #[arg(long)]
+    tor_proxy: Option<String>,
 }
 
 #[cfg(not(tarpaulin))]
@@ -16,12 +18,17 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = Config::from_file(&args.config)?;
+    let tor_proxy = args
+        .tor_proxy
+        .or(cfg.tor_proxy.clone())
+        .and_then(|s| s.parse().ok());
     let node = Node::new(
         cfg.listener_addrs(),
         cfg.node_type,
         Some(cfg.min_peers),
         cfg.wallet_address.clone(),
         Some(cfg.peers_file.clone()),
+        tor_proxy,
         Some(cfg.network_id.clone()),
         Some(cfg.protocol_version),
         Some(cfg.max_msgs_per_sec),

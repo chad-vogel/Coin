@@ -11,3 +11,4 @@ peers_file: "peers.txt"
 max_msgs_per_sec: 10
 max_peers: 32
 mining_threads: 1
+tor_proxy: null
