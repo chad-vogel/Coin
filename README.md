@@ -67,7 +67,7 @@ listeners:
     port: 9000
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 node_type: Miner
-chain_file: "chain.bin"
+chain_file: "blocks/blockchain.dat"
 seed_peers:
   - "127.0.0.1:9001"
 ```

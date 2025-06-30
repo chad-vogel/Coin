@@ -18,6 +18,9 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = Config::from_file(&args.config)?;
+    if let Some(parent) = std::path::Path::new(&cfg.chain_file).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     let tor_proxy = args
         .tor_proxy
         .or(cfg.tor_proxy.clone())
@@ -61,6 +64,9 @@ async fn main() -> Result<()> {
     node.shutdown();
     let handle = node.chain_handle();
     let chain = handle.lock().await;
+    if let Some(parent) = std::path::Path::new(&cfg.chain_file).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
     chain.save(&cfg.chain_file)?;
     node.save_peers().await?;
     Ok(())
