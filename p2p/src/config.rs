@@ -15,8 +15,8 @@ pub struct Config {
     pub listeners: Vec<Listener>,
     pub wallet_address: Option<String>,
     pub node_type: NodeType,
-    #[serde(default = "default_chain_file")]
-    pub chain_file: String,
+    #[serde(default = "default_block_dir")]
+    pub block_dir: String,
     #[serde(default)]
     pub seed_peers: Vec<String>,
     #[serde(default)]
@@ -33,8 +33,8 @@ pub struct Config {
     pub mining_threads: usize,
 }
 
-fn default_chain_file() -> String {
-    "blocks/blockchain.dat".to_string()
+fn default_block_dir() -> String {
+    "blocks".to_string()
 }
 
 fn default_network_id() -> String {
@@ -108,6 +108,7 @@ seed_peers:
         assert_eq!(cfg.max_peers, 32);
         assert!(cfg.mining_threads >= 1);
         assert!(cfg.tor_proxy.is_none());
+        assert_eq!(cfg.block_dir, "blocks");
     }
 
     #[test]

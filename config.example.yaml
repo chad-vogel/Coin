@@ -6,8 +6,8 @@ listeners:
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 # Node type: Wallet, Miner or Verifier
 node_type: Miner
-# Where the blockchain is stored on disk
-chain_file: "blocks/blockchain.dat"
+# Directory where block files are stored
+block_dir: "blocks"
 # List of peers to connect to on startup
 seed_peers:
   - "127.0.0.1:9001"

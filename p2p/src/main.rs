@@ -18,9 +18,7 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = Config::from_file(&args.config)?;
-    if let Some(parent) = std::path::Path::new(&cfg.chain_file).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    std::fs::create_dir_all(&cfg.block_dir)?;
     let tor_proxy = args
         .tor_proxy
         .or(cfg.tor_proxy.clone())
@@ -38,7 +36,7 @@ async fn main() -> Result<()> {
         Some(cfg.max_peers),
         Some(cfg.mining_threads),
     );
-    if let Ok(chain) = Blockchain::load(&cfg.chain_file) {
+    if let Ok(chain) = Blockchain::load(&cfg.block_dir) {
         *node.chain_handle().lock().await = chain;
     }
     let (addrs, _rx) = node.start().await?;
@@ -64,10 +62,8 @@ async fn main() -> Result<()> {
     node.shutdown();
     let handle = node.chain_handle();
     let chain = handle.lock().await;
-    if let Some(parent) = std::path::Path::new(&cfg.chain_file).parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    chain.save(&cfg.chain_file)?;
+    std::fs::create_dir_all(&cfg.block_dir)?;
+    chain.save(&cfg.block_dir)?;
     node.save_peers().await?;
     Ok(())
 }
