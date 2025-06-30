@@ -1,5 +1,5 @@
 use bs58;
-pub use coin_proto::Transaction;
+pub use coin_proto::{Transaction, TransactionInput, TransactionOutput};
 use ripemd::Ripemd160;
 use secp256k1;
 use serde_json;
@@ -69,6 +69,8 @@ pub fn new_transaction_with_fee(
         fee,
         signature: Vec::new(),
         encrypted_message: Vec::new(),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
     }
 }
 
@@ -80,6 +82,33 @@ pub fn new_transaction(
     new_transaction_with_fee(sender, recipient, amount, 0)
 }
 
+pub fn new_multi_transaction_with_fee(
+    sender: impl Into<String>,
+    outputs: Vec<(String, u64)>,
+    fee: u64,
+) -> Transaction {
+    let recipient = outputs.first().map(|o| o.0.clone()).unwrap_or_default();
+    let amount = outputs.first().map(|o| o.1).unwrap_or(0);
+    let extra: Vec<_> = outputs
+        .into_iter()
+        .skip(1)
+        .map(|(addr, amt)| TransactionOutput {
+            address: addr,
+            amount: amt,
+        })
+        .collect();
+    Transaction {
+        sender: sender.into(),
+        recipient,
+        amount,
+        fee,
+        signature: Vec::new(),
+        encrypted_message: Vec::new(),
+        inputs: Vec::new(),
+        outputs: extra,
+    }
+}
+
 /// Create a coinbase transaction paying `amount` to `miner`
 pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transaction {
     Transaction {
@@ -89,6 +118,8 @@ pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transactio
         fee: 0,
         signature: Vec::new(),
         encrypted_message: Vec::new(),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
     }
 }
 
@@ -133,6 +164,8 @@ pub fn new_transaction_with_message(
         fee,
         signature: Vec::new(),
         encrypted_message: encrypt_message(message, sender_sk, recipient_pk),
+        inputs: Vec::new(),
+        outputs: Vec::new(),
     }
 }
 
@@ -165,6 +198,14 @@ impl TransactionExt for Transaction {
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
         hasher.update(self.amount.to_be_bytes());
+        for inp in &self.inputs {
+            hasher.update(inp.address.as_bytes());
+            hasher.update(inp.amount.to_be_bytes());
+        }
+        for out in &self.outputs {
+            hasher.update(out.address.as_bytes());
+            hasher.update(out.amount.to_be_bytes());
+        }
         hasher.update(self.fee.to_be_bytes());
         hasher.update(&self.encrypted_message);
         let result = hasher.finalize();
@@ -300,7 +341,12 @@ impl Blockchain {
         if (!tx.sender.is_empty() && !valid_address(&tx.sender)) || !valid_address(&tx.recipient) {
             return false;
         }
-        if tx.amount == 0 {
+        for out in &tx.outputs {
+            if !valid_address(&out.address) {
+                return false;
+            }
+        }
+        if tx.amount == 0 && tx.outputs.iter().all(|o| o.amount == 0) {
             return false;
         }
         if !tx.sender.is_empty() {
@@ -310,13 +356,20 @@ impl Blockchain {
             let mut bal = self.balance(&tx.sender);
             for m in &self.mempool {
                 if m.sender == tx.sender && !m.sender.is_empty() {
-                    bal -= (m.amount + m.fee) as i64;
+                    let extra: u64 = m.outputs.iter().map(|o| o.amount).sum();
+                    bal -= (m.amount + extra + m.fee) as i64;
                 }
                 if m.recipient == tx.sender {
                     bal += m.amount as i64;
                 }
+                for o in &m.outputs {
+                    if o.address == tx.sender {
+                        bal += o.amount as i64;
+                    }
+                }
             }
-            if bal < (tx.amount + tx.fee) as i64 {
+            let total_out: u64 = tx.amount + tx.outputs.iter().map(|o| o.amount).sum::<u64>();
+            if bal < (total_out + tx.fee) as i64 {
                 return false;
             }
         }
@@ -501,10 +554,16 @@ impl Blockchain {
         for block in &self.chain {
             for tx in &block.transactions {
                 if tx.sender == addr && !tx.sender.is_empty() {
-                    bal -= (tx.amount + tx.fee) as i64;
+                    let extra: u64 = tx.outputs.iter().map(|o| o.amount).sum();
+                    bal -= (tx.amount + extra + tx.fee) as i64;
                 }
                 if tx.recipient == addr {
                     bal += tx.amount as i64;
+                }
+                for o in &tx.outputs {
+                    if o.address == addr {
+                        bal += o.amount as i64;
+                    }
                 }
             }
         }
@@ -744,6 +803,8 @@ mod tests {
                 fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
+                inputs: vec![],
+                outputs: vec![],
             }],
         };
         let chain = coin_proto::Chain {

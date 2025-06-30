@@ -762,6 +762,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/0", &mut tx);
         send_transaction(&addr.to_string(), &tx).await.unwrap();
@@ -852,6 +854,8 @@ mod tests {
                 fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
+                inputs: vec![],
+                outputs: vec![],
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
@@ -916,6 +920,8 @@ mod tests {
                     fee: 0,
                     signature: Vec::new(),
                     encrypted_message: Vec::new(),
+                    inputs: vec![],
+                    outputs: vec![],
                 }],
             });
         }
@@ -972,6 +978,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/0", &mut tx);
         let block = coin_proto::Block {
@@ -1022,6 +1030,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/0", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1087,6 +1097,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/0", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1124,6 +1136,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/0", &mut tx0);
         chain.add_transaction(tx0);
@@ -1137,6 +1151,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1170,6 +1186,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1215,6 +1233,8 @@ mod tests {
             fee: 0,
             signature: Vec::new(),
             encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1287,6 +1307,8 @@ mod tests {
                 fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
+                inputs: vec![],
+                outputs: vec![],
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
@@ -1331,6 +1353,8 @@ mod tests {
                 fee: 0,
                 signature: Vec::new(),
                 encrypted_message: Vec::new(),
+                inputs: vec![],
+                outputs: vec![],
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
