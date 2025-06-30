@@ -794,7 +794,12 @@ impl Node {
             if let NodeMessage::Chain(c) = resp {
                 let blocks: Vec<Block> = c.blocks.into_iter().filter_map(Block::from_rpc).collect();
                 if Blockchain::validate_chain(&blocks) {
-                    self.chain.lock().await.replace(blocks);
+                    let new_diff = Blockchain::total_difficulty_of(&blocks);
+                    let mut chain = self.chain.lock().await;
+                    let cur_diff = chain.total_difficulty();
+                    if new_diff > cur_diff || (new_diff == cur_diff && blocks.len() > chain.len()) {
+                        chain.replace(blocks);
+                    }
                 } else {
                     return Err(tokio::io::Error::new(
                         tokio::io::ErrorKind::InvalidData,
@@ -1017,21 +1022,16 @@ mod tests {
         let addr_a = addrs_a[0];
         {
             let mut chain = node_a.chain.lock().await;
-            let mut tx = Transaction {
-                sender: A1.into(),
-                recipient: A2.into(),
-                amount: 2,
-                fee: 0,
-                signature: Vec::new(),
-                encrypted_message: Vec::new(),
-                inputs: vec![],
-                outputs: vec![],
-            };
-            sign_for("m/0'/0/0", &mut tx);
-            chain.add_transaction(tx);
-            let mut block = chain.candidate_block();
-            block.header.difficulty = 0;
-            chain.add_block(block);
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 2,
+                },
+                transactions: vec![],
+            });
         }
 
         let node_b = Node::with_interval(
@@ -1048,11 +1048,38 @@ mod tests {
             None,
             None,
         );
+        {
+            let mut chain = node_b.chain.lock().await;
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![],
+            });
+            let prev = chain.last_block_hash().unwrap();
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: prev,
+                    merkle_root: String::new(),
+                    timestamp: 1,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![],
+            });
+        }
+
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
         node_b.connect(addr_a).await.unwrap();
         node_b.sync_from_peer(addr_a).await.unwrap();
         assert_eq!(node_b.chain_len().await, 1);
+        let diff = node_b.chain.lock().await.total_difficulty();
+        assert_eq!(diff, 2);
         node_a.peers.lock().await.remove(&addr_b);
         node_b.peers.lock().await.remove(&addr_a);
     }

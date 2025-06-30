@@ -512,8 +512,20 @@ impl Blockchain {
         true
     }
 
+    /// Calculate the cumulative difficulty for a slice of blocks.
+    pub fn total_difficulty_of(blocks: &[Block]) -> u64 {
+        blocks.iter().map(|b| b.header.difficulty as u64).sum()
+    }
+
+    /// Total difficulty of the current chain.
+    pub fn total_difficulty(&self) -> u64 {
+        Self::total_difficulty_of(&self.chain)
+    }
+
     pub fn replace(&mut self, new_chain: Vec<Block>) {
-        if new_chain.len() > self.chain.len() {
+        let new_diff = Self::total_difficulty_of(&new_chain);
+        let cur_diff = self.total_difficulty();
+        if new_diff > cur_diff || (new_diff == cur_diff && new_chain.len() > self.chain.len()) {
             self.chain = new_chain;
         }
     }
@@ -1030,5 +1042,74 @@ mod tests {
         assert_eq!(hash_before, block_pruned.hash());
         assert!(Blockchain::validate_chain(&[block.clone()]));
         assert!(Blockchain::validate_chain(&[block_pruned.clone()]));
+    }
+
+    #[test]
+    fn total_difficulty_and_replace() {
+        let mut bc = Blockchain::new();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 1,
+            },
+            transactions: vec![],
+        });
+
+        assert_eq!(bc.total_difficulty(), 1);
+
+        let weaker = vec![Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![],
+        }];
+        bc.replace(weaker.clone());
+        assert_eq!(bc.len(), 1);
+        assert_eq!(bc.total_difficulty(), 1);
+
+        let stronger = vec![Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 2,
+            },
+            transactions: vec![],
+        }];
+        bc.replace(stronger.clone());
+        assert_eq!(bc.total_difficulty(), 2);
+
+        let tie_longer = vec![
+            Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 2,
+                },
+                transactions: vec![],
+            },
+            Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 1,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![],
+            },
+        ];
+        bc.replace(tie_longer);
+        assert_eq!(bc.len(), 2);
     }
 }
