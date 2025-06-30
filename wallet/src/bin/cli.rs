@@ -1,4 +1,4 @@
-#![cfg_attr(tarpaulin, skip)]
+#![cfg_attr(tarpaulin, ignore)]
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};

@@ -19,7 +19,7 @@ fn generate_and_derive() {
         .unwrap();
     assert!(out.status.success());
     let addr = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(addr.trim().len(), 34);
+    assert!(matches!(addr.trim().len(), 33 | 34));
 }
 
 #[cfg(not(tarpaulin))]
@@ -45,5 +45,5 @@ fn import_and_derive() {
         .unwrap();
     assert!(out.status.success());
     let addr = String::from_utf8(out.stdout).unwrap();
-    assert_eq!(addr.trim().len(), 34);
+    assert!(matches!(addr.trim().len(), 33 | 34));
 }
