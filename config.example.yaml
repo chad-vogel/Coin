@@ -13,8 +13,6 @@ chain_file: "chain.bin"
 # List of peers to connect to on startup
 seed_peers:
   - "127.0.0.1:9001"
-# File storing discovered peers
-peers_file: "peers.txt"
 max_msgs_per_sec: 10
 max_peers: 32
 mining_threads: 1

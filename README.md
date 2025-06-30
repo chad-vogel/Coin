@@ -74,7 +74,6 @@ min_peers: 1
 chain_file: "chain.bin"
 seed_peers:
   - "127.0.0.1:9001"
-peers_file: "peers.txt"
 ```
 
 Field descriptions:
@@ -85,7 +84,6 @@ Field descriptions:
 - `min_peers` – how many peers must be connected before mining or verifying.
 - `chain_file` – path to the saved blockchain.
 - `seed_peers` – peers contacted on startup for bootstrapping.
-- `peers_file` – file for persisting discovered peers.
 
 ## Tor Usage
 
