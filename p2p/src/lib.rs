@@ -311,6 +311,26 @@ impl Node {
         self.running.store(true, Ordering::SeqCst);
         self.load_peers().await;
 
+        {
+            let mut chain = self.chain.lock().await;
+            let _ = chain.load_mempool("mempool.bin");
+        }
+
+        let save_chain = self.chain.clone();
+        let save_running = self.running.clone();
+        tokio::spawn(async move {
+            loop {
+                if !save_running.load(Ordering::SeqCst) {
+                    break;
+                }
+                {
+                    let chain = save_chain.lock().await;
+                    let _ = chain.save_mempool("mempool.bin");
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+
         let mut listeners = Vec::new();
         for addr in &self.listeners {
             listeners.push(TcpListener::bind(addr).await?);

@@ -430,6 +430,12 @@ impl Blockchain {
         f.write_all(&data)
     }
 
+    pub fn save_mempool<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        let data = serde_json::to_vec(&self.mempool).unwrap();
+        let mut f = File::create(path)?;
+        f.write_all(&data)
+    }
+
     pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
         let f = File::open(path)?;
         let chain_msg: coin_proto::Chain = serde_json::from_reader(f).unwrap();
@@ -449,6 +455,13 @@ impl Blockchain {
             bc.add_block(block);
         }
         Ok(bc)
+    }
+
+    pub fn load_mempool<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
+        let f = File::open(path)?;
+        let mempool: Vec<Transaction> = serde_json::from_reader(f).unwrap();
+        self.mempool = mempool;
+        Ok(())
     }
 
     /// Calculate the balance for `addr` by scanning the chain
@@ -823,5 +836,18 @@ mod tests {
         );
         let tx = new_transaction_with_message(A1, A2, 5, 0, "secret", &sk_sender, &pk_recipient);
         assert!(!tx.encrypted_message.is_empty());
+    }
+
+    #[test]
+    fn mempool_save_load_roundtrip() {
+        let mut bc = Blockchain::new();
+        bc.add_transaction(coinbase_transaction(A1, 5));
+        bc.add_transaction(coinbase_transaction(A2, 7));
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        bc.save_mempool(tmp.path()).unwrap();
+
+        let mut bc2 = Blockchain::new();
+        bc2.load_mempool(tmp.path()).unwrap();
+        assert_eq!(bc.mempool, bc2.mempool);
     }
 }
