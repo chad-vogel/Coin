@@ -3,7 +3,7 @@ listeners:
     port: 9000
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 node_type: Miner
-chain_file: "blocks/blockchain.dat"
+block_dir: "blocks"
 seed_peers:
   - "127.0.0.1:9001"
 max_msgs_per_sec: 10

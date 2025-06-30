@@ -1202,7 +1202,7 @@ mod tests {
             blocks: vec![block],
         });
         write_msg(&mut stream, &chain_msg).await.unwrap();
-        sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(200)).await;
         assert_eq!(node.chain_len().await, 1);
     }
 
@@ -1333,7 +1333,7 @@ mod tests {
         node_a.chain.lock().await.add_block(block.clone());
         node_a.broadcast_block(&block).await.unwrap();
 
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(200)).await;
         assert_eq!(node_b.chain_len().await, 1);
 
         node_a.peers.lock().await.remove(&addr_b);

@@ -67,7 +67,7 @@ listeners:
     port: 9000
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 node_type: Miner
-chain_file: "blocks/blockchain.dat"
+block_dir: "blocks"
 seed_peers:
   - "127.0.0.1:9001"
 ```
@@ -77,7 +77,7 @@ Field descriptions:
 - `listeners` – network interfaces and ports to bind.
 - `wallet_address` – optional address used when mining rewards are paid.
 - `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
-- `chain_file` – path to the saved blockchain.
+- `block_dir` – directory where block files are stored.
 - `seed_peers` – peers contacted on startup for bootstrapping.
 
 ## Tor Usage

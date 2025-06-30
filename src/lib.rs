@@ -534,13 +534,26 @@ impl Blockchain {
         self.chain.clone()
     }
 
-    pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        let chain = coin_proto::Chain {
-            blocks: self.chain.iter().map(|b| b.to_rpc()).collect(),
-        };
-        let data = serde_json::to_vec(&chain).unwrap();
-        let mut f = File::create(path)?;
-        f.write_all(&data)
+    pub fn save<P: AsRef<Path>>(&self, dir: P) -> std::io::Result<()> {
+        use std::fs;
+
+        let dir = dir.as_ref();
+        fs::create_dir_all(dir)?;
+        // remove existing block files to avoid duplication
+        if dir.exists() {
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with("blk") && name.ends_with(".dat") {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+        for block in &self.chain {
+            blockfile::append_block(dir, block)?;
+        }
+        Ok(())
     }
 
     pub fn save_mempool<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
@@ -549,14 +562,8 @@ impl Blockchain {
         f.write_all(&data)
     }
 
-    pub fn load<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
-        let f = File::open(path)?;
-        let chain_msg: coin_proto::Chain = serde_json::from_reader(f).unwrap();
-        let blocks: Vec<Block> = chain_msg
-            .blocks
-            .into_iter()
-            .filter_map(Block::from_rpc)
-            .collect();
+    pub fn load<P: AsRef<Path>>(dir: P) -> std::io::Result<Self> {
+        let blocks = blockfile::read_blocks(dir.as_ref())?;
         if !Self::validate_chain(&blocks) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -823,24 +830,25 @@ mod tests {
             transactions: vec![tx],
         };
         bc.add_block(block);
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        bc.save(tmp.path()).unwrap();
-        let loaded = Blockchain::load(tmp.path()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.len(), bc.len());
         assert_eq!(loaded.last_block_hash(), bc.last_block_hash());
     }
 
     #[test]
     fn load_rejects_invalid_chain() {
-        let block = coin_proto::Block {
-            header: coin_proto::BlockHeader {
+        let dir = tempfile::tempdir().unwrap();
+        let block = Block {
+            header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coin_proto::Transaction {
+            transactions: vec![Transaction {
                 sender: A1.into(),
                 recipient: A2.into(),
                 amount: 1,
@@ -851,12 +859,8 @@ mod tests {
                 outputs: vec![],
             }],
         };
-        let chain = coin_proto::Chain {
-            blocks: vec![block],
-        };
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        serde_json::to_writer(File::create(tmp.path()).unwrap(), &chain).unwrap();
-        let res = Blockchain::load(tmp.path());
+        blockfile::append_block(dir.path(), &block).unwrap();
+        let res = Blockchain::load(dir.path());
         assert!(res.is_err());
     }
 
