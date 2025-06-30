@@ -974,9 +974,16 @@ mod tests {
             addrs: vec!["127.0.0.1:12345".into()],
         });
         write_msg(&mut stream, &peers_msg).await.unwrap();
-        sleep(Duration::from_millis(50)).await;
-        let peers = node.peers().await;
-        assert!(peers.iter().any(|p| p.port() == 12345));
+        // Tarpaulin instrumentation slows down the event loop so wait a bit
+        // longer for the peers message to be processed.
+        for _ in 0..20 {
+            sleep(Duration::from_millis(50)).await;
+            let peers = node.peers().await;
+            if peers.iter().any(|p| p.port() == 12345) {
+                return;
+            }
+        }
+        panic!("peer not added");
     }
 
     #[tokio::test]

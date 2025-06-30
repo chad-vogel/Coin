@@ -127,6 +127,27 @@ let signer: SigningKey = (&child).into();
 let sig = signer.sign(&hash);
 ```
 
+## Wallet CLI
+
+The `coin-wallet` crate includes a simple command line interface. Generate a new wallet and save the mnemonic with:
+
+```bash
+cargo run -p coin-wallet --bin cli -- generate --wallet my.mnemonic
+```
+
+Derive addresses or view balances via a running node:
+
+```bash
+cargo run -p coin-wallet --bin cli -- derive --wallet my.mnemonic --path "m/0'/0/0"
+cargo run -p coin-wallet --bin cli -- balance --address <ADDR> --node 127.0.0.1:9000
+```
+
+Transactions can be signed and broadcasted:
+
+```bash
+cargo run -p coin-wallet --bin cli -- send --to <ADDR> --amount 1 --path "m/0'/0/0" --node 127.0.0.1:9000
+```
+
 ## Development
 
 ```bash
