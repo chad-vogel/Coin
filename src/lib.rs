@@ -840,6 +840,30 @@ mod tests {
     }
 
     #[test]
+    fn save_creates_block_files() {
+        let mut bc = Blockchain::new();
+        for i in 0..2 {
+            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            bc.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: compute_merkle_root(&[tx.clone()]),
+                    timestamp: i,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx],
+            });
+        }
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        assert!(dir.path().join("blk00000.dat").exists());
+        assert!(dir.path().join("blk00001.dat").exists());
+        let loaded = Blockchain::load(dir.path()).unwrap();
+        assert_eq!(loaded.all(), bc.all());
+    }
+
+    #[test]
     fn load_rejects_invalid_chain() {
         let dir = tempfile::tempdir().unwrap();
         let block = Block {
