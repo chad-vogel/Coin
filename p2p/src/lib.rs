@@ -329,25 +329,17 @@ impl Node {
         Ok(())
     }
 
-    /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
-    pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
-        self.running.store(true, Ordering::SeqCst);
-        self.load_peers().await;
-
+    async fn restore_mempool(&self) {
         let _ = std::fs::remove_file("mempool.bin");
+        let mut chain = self.chain.lock().await;
+        let _ = chain.load_mempool("mempool.bin");
+    }
 
-        {
-            let mut chain = self.chain.lock().await;
-            let _ = chain.load_mempool("mempool.bin");
-        }
-
+    fn spawn_mempool_saver(&self) {
         let save_chain = self.chain.clone();
         let save_running = self.running.clone();
         tokio::spawn(async move {
-            loop {
-                if !save_running.load(Ordering::SeqCst) {
-                    break;
-                }
+            while save_running.load(Ordering::SeqCst) {
                 {
                     let chain = save_chain.lock().await;
                     let _ = chain.save_mempool("mempool.bin");
@@ -355,6 +347,98 @@ impl Node {
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         });
+    }
+
+    fn spawn_ping_loop(&self) {
+        let peers = self.peers.clone();
+        let interval = self.ping_interval;
+        let nid = self.network_id.clone();
+        let ver = self.protocol_version;
+        let proxy = self.tor_proxy;
+        let running = self.running.clone();
+        tokio::spawn(async move {
+            loop {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                tokio::time::sleep(interval).await;
+                let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
+                for addr in list {
+                    let peers = peers.clone();
+                    let nid = nid.clone();
+                    let ver = ver;
+                    let running = running.clone();
+                    tokio::spawn(async move {
+                        if !running.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        if let Ok(mut stream) = connect_with_proxy(addr, proxy).await {
+                            let hs = NodeMessage::Handshake(Handshake {
+                                network_id: nid.clone(),
+                                version: ver,
+                            });
+                            if write_msg(&mut stream, &hs).await.is_ok() {
+                                if let Ok(resp) = read_msg(&mut stream).await {
+                                    if matches!(resp, NodeMessage::Handshake(_)) {
+                                        let ping = NodeMessage::Ping(Ping {});
+                                        if write_msg(&mut stream, &ping).await.is_ok() {
+                                            match read_with_timeout(&mut stream).await {
+                                                Ok(true) => return,
+                                                Ok(false) => (),
+                                                Err(_) => (),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        peers.lock().await.remove(&addr);
+                    });
+                }
+            }
+        });
+    }
+
+    fn spawn_miner_loop(&self) {
+        let peers = self.peers.clone();
+        let chain = self.chain.clone();
+        let min = self.min_peers;
+        let reward = self
+            .wallet_address
+            .clone()
+            .unwrap_or_else(|| "miner".to_string());
+        let nid = self.network_id.clone();
+        let ver = self.protocol_version;
+        let threads = self.mining_threads;
+        let proxy = self.tor_proxy;
+        let running = self.running.clone();
+        tokio::spawn(async move {
+            loop {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                while peers.lock().await.len() < min {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                {
+                    let mut chain = chain.lock().await;
+                    if chain.len() == 0 || chain.mempool_len() > 0 {
+                        let block = mine_block_threads(&mut chain, &reward, threads);
+                        broadcast_block_internal(peers.clone(), &block, &nid, ver, proxy).await;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+    }
+
+    /// Start IPv4 and IPv6 listeners and return local addresses and receiver for incoming transactions
+    pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
+        self.running.store(true, Ordering::SeqCst);
+        self.load_peers().await;
+
+        self.restore_mempool().await;
+        self.spawn_mempool_saver();
 
         let mut listeners = Vec::new();
         for addr in &self.listeners {
@@ -535,86 +619,9 @@ impl Node {
             });
         }
 
-        // periodic ping loop
-        let peers = self.peers.clone();
-        let interval = self.ping_interval;
-        let nid = self.network_id.clone();
-        let ver = self.protocol_version;
-        let proxy = self.tor_proxy;
-        let running = self.running.clone();
-        tokio::spawn(async move {
-            loop {
-                if !running.load(Ordering::SeqCst) {
-                    break;
-                }
-                tokio::time::sleep(interval).await;
-                let list: Vec<SocketAddr> = peers.lock().await.iter().copied().collect();
-                for addr in list {
-                    let peers = peers.clone();
-                    let nid = nid.clone();
-                    let ver = ver;
-                    let running = running.clone();
-                    tokio::spawn(async move {
-                        if !running.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        if let Ok(mut stream) = connect_with_proxy(addr, proxy).await {
-                            let hs = NodeMessage::Handshake(Handshake {
-                                network_id: nid.clone(),
-                                version: ver,
-                            });
-                            if write_msg(&mut stream, &hs).await.is_ok() {
-                                if let Ok(resp) = read_msg(&mut stream).await {
-                                    if matches!(resp, NodeMessage::Handshake(_)) {
-                                        let ping = NodeMessage::Ping(Ping {});
-                                        if write_msg(&mut stream, &ping).await.is_ok() {
-                                            match read_with_timeout(&mut stream).await {
-                                                Ok(true) => return,
-                                                Ok(false) => (),
-                                                Err(_) => (),
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        peers.lock().await.remove(&addr);
-                    });
-                }
-            }
-        });
-
+        self.spawn_ping_loop();
         if self.node_type == NodeType::Miner {
-            let peers = self.peers.clone();
-            let chain = self.chain.clone();
-            let min = self.min_peers;
-            let reward = self
-                .wallet_address
-                .clone()
-                .unwrap_or_else(|| "miner".to_string());
-            let nid = self.network_id.clone();
-            let ver = self.protocol_version;
-            let threads = self.mining_threads;
-            let proxy = self.tor_proxy;
-            let running = self.running.clone();
-            tokio::spawn(async move {
-                loop {
-                    if !running.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    while peers.lock().await.len() < min {
-                        tokio::time::sleep(Duration::from_millis(50)).await;
-                    }
-                    {
-                        let mut chain = chain.lock().await;
-                        if chain.len() == 0 || chain.mempool_len() > 0 {
-                            let block = mine_block_threads(&mut chain, &reward, threads);
-                            broadcast_block_internal(peers.clone(), &block, &nid, ver, proxy).await;
-                        }
-                    }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-            });
+            self.spawn_miner_loop();
         }
 
         Ok((local_addrs, rx))
