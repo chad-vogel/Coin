@@ -513,17 +513,42 @@ impl Blockchain {
     }
 
     pub fn validate_chain(blocks: &[Block]) -> bool {
+        let mut mined = 0u64;
         for (i, block) in blocks.iter().enumerate() {
             if i > 0 && block.header.previous_hash != blocks[i - 1].hash() {
                 return false;
             }
 
             if !block.transactions.is_empty() {
+                let mut fees = 0u64;
+                let mut coinbase: Option<&Transaction> = None;
                 for tx in &block.transactions {
-                    if !tx.sender.is_empty() && !tx.verify() {
-                        return false;
+                    if tx.sender.is_empty() {
+                        if coinbase.is_some() {
+                            return false;
+                        }
+                        if tx.fee != 0 || !tx.inputs.is_empty() {
+                            return false;
+                        }
+                        coinbase = Some(tx);
+                    } else {
+                        if !tx.verify() {
+                            return false;
+                        }
+                        fees += tx.fee;
                     }
                 }
+                let reward = Blockchain::subsidy_for_height(i as u64, mined);
+                let expected = reward + fees;
+                let cb = match coinbase {
+                    Some(c) => c,
+                    None => return false,
+                };
+                if cb.amount != expected {
+                    return false;
+                }
+                mined = mined.saturating_add(reward);
+
                 let merkle = compute_merkle_root(&block.transactions);
                 if merkle != block.header.merkle_root {
                     return false;
@@ -1226,15 +1251,16 @@ mod tests {
         });
         let mut tx = new_transaction(&addr1, &addr2, 10);
         tx.sign(&sk1);
+        let cb2 = coinbase_transaction(&addr2, bc.block_subsidy());
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: bc.last_block_hash().unwrap(),
-                merkle_root: compute_merkle_root(&[tx.clone()]),
+                merkle_root: compute_merkle_root(&[cb2.clone(), tx.clone()]),
                 timestamp: 1,
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![tx],
+            transactions: vec![cb2, tx],
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
@@ -1283,6 +1309,54 @@ mod tests {
     }
 
     #[test]
+    fn validate_chain_accepts_correct_rewards() {
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        tx.sign(&sk1);
+        let reward = Blockchain::subsidy_for_height(0, 0);
+        let cb = coinbase_transaction(&addr1, reward + tx.fee);
+        let merkle = compute_merkle_root(&[cb.clone(), tx.clone()]);
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: merkle,
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![cb, tx],
+        };
+        assert!(Blockchain::validate_chain(&[block]));
+    }
+
+    #[test]
+    fn validate_chain_rejects_bad_reward() {
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        tx.sign(&sk1);
+        let reward = Blockchain::subsidy_for_height(0, 0);
+        let cb = coinbase_transaction(&addr1, reward + tx.fee + 1);
+        let merkle = compute_merkle_root(&[cb.clone(), tx.clone()]);
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: merkle,
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![cb, tx],
+        };
+        assert!(!Blockchain::validate_chain(&[block]));
+    }
+
+    #[test]
     fn add_block_consumes_inputs() {
         let mut bc = Blockchain::new();
         let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
@@ -1327,9 +1401,12 @@ mod tests {
             let mut prev_hash = String::new();
             let mut timestamp = 0u64;
             let mut chain = Vec::new();
-            for addr in addrs {
+            let mut mined = 0u64;
+            for (i, addr) in addrs.into_iter().enumerate() {
                 timestamp += 1;
-                let tx = coinbase_transaction(&addr, 1);
+                let reward = Blockchain::subsidy_for_height(i as u64, mined);
+                mined += reward;
+                let tx = coinbase_transaction(&addr, reward);
                 let merkle = compute_merkle_root(&[tx.clone()]);
                 let block = Block {
                     header: BlockHeader {
@@ -1352,9 +1429,12 @@ mod tests {
             let mut prev_hash = String::new();
             let mut timestamp = 0u64;
             let mut chain = Vec::new();
-            for addr in addrs {
+            let mut mined = 0u64;
+            for (i, addr) in addrs.into_iter().enumerate() {
                 timestamp += 1;
-                let tx = coinbase_transaction(&addr, 1);
+                let reward = Blockchain::subsidy_for_height(i as u64, mined);
+                mined += reward;
+                let tx = coinbase_transaction(&addr, reward);
                 let merkle = compute_merkle_root(&[tx.clone()]);
                 let block = Block {
                     header: BlockHeader {
