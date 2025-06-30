@@ -626,6 +626,7 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
     const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
@@ -1116,5 +1117,69 @@ mod tests {
         ];
         bc.replace(tie_longer);
         assert_eq!(bc.len(), 2);
+    }
+
+    // Strategy to generate random valid addresses using secret keys
+    fn arb_address() -> impl Strategy<Value = String> {
+        any::<[u8; 32]>()
+            .prop_filter_map("valid key", |b| secp256k1::SecretKey::from_slice(&b).ok())
+            .prop_map(|sk| address_from_secret(&sk))
+            .prop_filter("length", |addr| addr.len() == 34)
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn prop_valid_chains(addrs in proptest::collection::vec(arb_address(), 1..5)) {
+            let mut prev_hash = String::new();
+            let mut timestamp = 0u64;
+            let mut chain = Vec::new();
+            for addr in addrs {
+                timestamp += 1;
+                let tx = coinbase_transaction(&addr, 1);
+                let merkle = compute_merkle_root(&[tx.clone()]);
+                let block = Block {
+                    header: BlockHeader {
+                        previous_hash: prev_hash.clone(),
+                        merkle_root: merkle,
+                        timestamp,
+                        nonce: 0,
+                        difficulty: 0,
+                    },
+                    transactions: vec![tx],
+                };
+                prev_hash = block.hash();
+                chain.push(block);
+            }
+            proptest::prop_assert!(Blockchain::validate_chain(&chain));
+        }
+
+        #[test]
+        fn prop_invalid_chains(addrs in proptest::collection::vec(arb_address(), 2..5)) {
+            let mut prev_hash = String::new();
+            let mut timestamp = 0u64;
+            let mut chain = Vec::new();
+            for addr in addrs {
+                timestamp += 1;
+                let tx = coinbase_transaction(&addr, 1);
+                let merkle = compute_merkle_root(&[tx.clone()]);
+                let block = Block {
+                    header: BlockHeader {
+                        previous_hash: prev_hash.clone(),
+                        merkle_root: merkle,
+                        timestamp,
+                        nonce: 0,
+                        difficulty: 0,
+                    },
+                    transactions: vec![tx],
+                };
+                prev_hash = block.hash();
+                chain.push(block);
+            }
+            // Corrupt the last block
+            if let Some(last) = chain.last_mut() {
+                last.header.merkle_root.push('0');
+            }
+            proptest::prop_assert!(!Blockchain::validate_chain(&chain));
+        }
     }
 }
