@@ -15,8 +15,6 @@ pub struct Config {
     pub listeners: Vec<Listener>,
     pub wallet_address: Option<String>,
     pub node_type: NodeType,
-    #[serde(default = "default_min_peers")]
-    pub min_peers: usize,
     #[serde(default = "default_chain_file")]
     pub chain_file: String,
     #[serde(default)]
@@ -37,10 +35,6 @@ pub struct Config {
 
 fn default_chain_file() -> String {
     "chain.bin".to_string()
-}
-
-fn default_min_peers() -> usize {
-    1
 }
 
 fn default_network_id() -> String {

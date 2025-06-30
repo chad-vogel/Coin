@@ -45,12 +45,9 @@ The `coin-p2p` crate provides a simple command line interface. A miner can be
 started with:
 
 ```bash
-cargo run -p coin-p2p -- --port <PORT> --node-type miner [--min-peers N]
+cargo run -p coin-p2p -- --port <PORT> --node-type miner
 ```
-Replace `<PORT>` with the TCP port to listen on. `--min-peers` controls how many peers must
-be connected before a miner begins hashing and defaults to `1`. The first miner can
-run with `--min-peers 0` and will mine a genesis block even without pending transactions.
-Additional nodes can be run as
+Replace `<PORT>` with the TCP port to listen on. Additional nodes can be run as
 `wallet` or `verifier` types using the same command structure:
 
 ```bash
@@ -70,7 +67,6 @@ listeners:
     port: 9000
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 node_type: Miner
-min_peers: 1
 chain_file: "chain.bin"
 seed_peers:
   - "127.0.0.1:9001"
@@ -81,7 +77,6 @@ Field descriptions:
 - `listeners` – network interfaces and ports to bind.
 - `wallet_address` – optional address used when mining rewards are paid.
 - `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
-- `min_peers` – how many peers must be connected before mining or verifying.
 - `chain_file` – path to the saved blockchain.
 - `seed_peers` – peers contacted on startup for bootstrapping.
 
