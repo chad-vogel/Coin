@@ -142,7 +142,7 @@ mod real_cli {
 
     async fn fetch_chain(addr: &str) -> Result<Vec<coin::Block>> {
         let mut stream = rpc_connect(addr).await?;
-        let get = RpcMessage::GetChain(GetChain {});
+        let get = RpcMessage::GetChain;
         write_msg(&mut stream, &get).await?;
         loop {
             match read_msg(&mut stream).await? {

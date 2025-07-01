@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-tests")]
+
 use assert_cmd::Command;
 use tempfile;
 

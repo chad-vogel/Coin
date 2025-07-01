@@ -9,6 +9,7 @@ use rand::rngs::OsRng;
 use secp256k1::{self, Secp256k1};
 use serde_json;
 use sha2::Digest;
+use stake::{ConsensusState, StakeRegistry, Vote as StakeVote};
 use std::collections::{HashMap, HashSet};
 use std::net::{SocketAddr, ToSocketAddrs as StdToSocketAddrs};
 use std::sync::{
@@ -239,6 +240,8 @@ pub struct Node {
     ping_interval: Duration,
     node_type: NodeType,
     chain: Arc<Mutex<Blockchain>>,
+    stake: Arc<Mutex<StakeRegistry>>,
+    consensus: Arc<Mutex<ConsensusState>>,
     min_peers: usize,
     wallet_address: Option<String>,
     peers_file: String,
@@ -269,6 +272,8 @@ impl Node {
         mining_threads: Option<usize>,
     ) -> Self {
         let (node_key, node_pub) = load_or_create_key("node.key");
+        let stake = Arc::new(Mutex::new(StakeRegistry::new()));
+        let consensus = Arc::new(Mutex::new(ConsensusState::new(StakeRegistry::new())));
         Self {
             listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
@@ -276,6 +281,8 @@ impl Node {
             ping_interval: Duration::from_secs(5),
             node_type,
             chain: Arc::new(Mutex::new(Blockchain::new())),
+            stake,
+            consensus,
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
             peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
@@ -320,6 +327,8 @@ impl Node {
         mining_threads: Option<usize>,
     ) -> Self {
         let (node_key, node_pub) = load_or_create_key("node.key");
+        let stake = Arc::new(Mutex::new(StakeRegistry::new()));
+        let consensus = Arc::new(Mutex::new(ConsensusState::new(StakeRegistry::new())));
         Self {
             listeners,
             peers: Arc::new(Mutex::new(HashSet::new())),
@@ -327,6 +336,8 @@ impl Node {
             ping_interval: interval,
             node_type,
             chain: Arc::new(Mutex::new(Blockchain::new())),
+            stake,
+            consensus,
             min_peers: min_peers.unwrap_or(1),
             wallet_address,
             peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
@@ -539,6 +550,7 @@ impl Node {
         let protocol_version = self.protocol_version;
         let key = self.node_key.clone();
         let pubk = self.node_pub.clone();
+        let consensus = self.consensus.clone();
 
         // accept loop for each listener
         for listener in listeners {
@@ -553,6 +565,7 @@ impl Node {
             let running = self.running.clone();
             let key = key.clone();
             let pubk = pubk.clone();
+            let consensus = consensus.clone();
             tokio::spawn(async move {
                 loop {
                     if !running.load(Ordering::SeqCst) {
@@ -570,6 +583,7 @@ impl Node {
                         let ver = ver;
                         let max = max;
                         let running = running.clone();
+                        let consensus = consensus.clone();
                         tokio::spawn(async move {
                             if !running.load(Ordering::SeqCst) {
                                 return;
@@ -692,6 +706,27 @@ impl Node {
                                                     }
                                                 }
                                             }
+                                            RpcMessage::Vote(v) => {
+                                                if let Some(block_hash) =
+                                                    consensus.lock().await.current_hash()
+                                                {
+                                                    if block_hash == v.block_hash {
+                                                        let mut vote = StakeVote {
+                                                            validator: v.validator,
+                                                            block_hash: v.block_hash,
+                                                            signature: v.signature,
+                                                        };
+                                                        let reached = consensus
+                                                            .lock()
+                                                            .await
+                                                            .register_vote(&vote);
+                                                        if reached {
+                                                            // finalized block
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            RpcMessage::Schedule(_) => {}
                                             RpcMessage::Handshake(_) => {}
                                         }
                                     }
@@ -803,6 +838,40 @@ impl Node {
             self.tor_proxy,
         )
         .await;
+        Ok(())
+    }
+
+    pub async fn broadcast_vote(&self, vote: &StakeVote) -> tokio::io::Result<()> {
+        let msg = RpcMessage::Vote(coin_proto::Vote {
+            validator: vote.validator.clone(),
+            block_hash: vote.block_hash.clone(),
+            signature: vote.signature.clone(),
+        });
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
+        for addr in list {
+            if let Ok(mut stream) = self.connect_stream(addr).await {
+                let hs = RpcMessage::Handshake(self.build_handshake());
+                if write_msg(&mut stream, &hs).await.is_ok() {
+                    let _ = read_msg(&mut stream).await;
+                    let _ = write_msg(&mut stream, &msg).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_schedule(&self, slot: u64, validator: String) -> tokio::io::Result<()> {
+        let msg = RpcMessage::Schedule(coin_proto::Schedule { slot, validator });
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
+        for addr in list {
+            if let Ok(mut stream) = self.connect_stream(addr).await {
+                let hs = RpcMessage::Handshake(self.build_handshake());
+                if write_msg(&mut stream, &hs).await.is_ok() {
+                    let _ = read_msg(&mut stream).await;
+                    let _ = write_msg(&mut stream, &msg).await;
+                }
+            }
+        }
         Ok(())
     }
 

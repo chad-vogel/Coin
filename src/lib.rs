@@ -204,6 +204,21 @@ pub fn valid_address(addr: &str) -> bool {
     checksum == &check[..4]
 }
 
+/// Derive an address from a secret key.
+pub fn address_from_secret(sk: &secp256k1::SecretKey) -> String {
+    let secp = secp256k1::Secp256k1::new();
+    let pk = secp256k1::PublicKey::from_secret_key(&secp, sk);
+    let pk_bytes = pk.serialize();
+    let sha = Sha256::digest(pk_bytes);
+    let rip = Ripemd160::digest(sha);
+    let mut payload = Vec::with_capacity(25);
+    payload.push(0x00);
+    payload.extend_from_slice(&rip);
+    let check = Sha256::digest(Sha256::digest(&payload));
+    payload.extend_from_slice(&check[..4]);
+    bs58::encode(payload).into_string()
+}
+
 pub trait TransactionExt {
     fn hash(&self) -> String;
     fn sign(&mut self, sk: &secp256k1::SecretKey);
@@ -344,6 +359,7 @@ pub struct Blockchain {
     mempool: Vec<Transaction>,
     difficulty: u32,
     utxos: HashMap<String, u64>,
+    locked: HashMap<String, u64>,
 }
 
 impl Blockchain {
@@ -353,6 +369,7 @@ impl Blockchain {
             mempool: Vec::new(),
             difficulty: 1,
             utxos: HashMap::new(),
+            locked: HashMap::new(),
         }
     }
 
@@ -642,7 +659,9 @@ impl Blockchain {
 
     /// Calculate the balance for `addr` by scanning the chain
     pub fn balance(&self, addr: &str) -> i64 {
-        *self.utxos.get(addr).unwrap_or(&0) as i64
+        let total = *self.utxos.get(addr).unwrap_or(&0) as i64;
+        let locked = *self.locked.get(addr).unwrap_or(&0) as i64;
+        total - locked
     }
 
     fn available_utxo(&self, addr: &str) -> i64 {
@@ -664,8 +683,35 @@ impl Blockchain {
         bal
     }
 
+    pub fn lock_stake(&mut self, addr: &str, amount: u64) -> bool {
+        let bal = self.balance(addr);
+        if bal < amount as i64 {
+            return false;
+        }
+        let entry = self.locked.entry(addr.to_string()).or_default();
+        *entry += amount;
+        true
+    }
+
+    pub fn unlock_stake(&mut self, addr: &str, amount: u64) -> bool {
+        if let Some(entry) = self.locked.get_mut(addr) {
+            if *entry >= amount {
+                *entry -= amount;
+                if *entry == 0 {
+                    self.locked.remove(addr);
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn mempool_len(&self) -> usize {
         self.mempool.len()
+    }
+
+    pub fn locked_balance(&self, addr: &str) -> u64 {
+        *self.locked.get(addr).unwrap_or(&0)
     }
 
     /// Prune transactions from blocks older than `depth` from the tip.
@@ -924,6 +970,40 @@ mod tests {
     }
 
     #[test]
+    fn save_removes_existing_block_files() {
+        let mut bc = Blockchain::new();
+        for _ in 0..2 {
+            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            bc.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: compute_merkle_root(&[tx.clone()]),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx],
+            });
+        }
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        std::fs::write(dir.path().join("blk99999.dat"), b"junk").unwrap();
+        bc.save(dir.path()).unwrap();
+        let count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("blk")
+            })
+            .count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn load_rejects_invalid_chain() {
         let dir = tempfile::tempdir().unwrap();
         let block = Block {
@@ -950,20 +1030,6 @@ mod tests {
         assert!(res.is_err());
     }
 
-    fn address_from_secret(sk: &secp256k1::SecretKey) -> String {
-        let secp = secp256k1::Secp256k1::new();
-        let pk = secp256k1::PublicKey::from_secret_key(&secp, sk);
-        let pk_bytes = pk.serialize();
-        let sha = Sha256::digest(pk_bytes);
-        let rip = Ripemd160::digest(sha);
-        let mut payload = Vec::with_capacity(25);
-        payload.push(0x00);
-        payload.extend_from_slice(&rip);
-        let check = Sha256::digest(Sha256::digest(&payload));
-        payload.extend_from_slice(&check[..4]);
-        bs58::encode(payload).into_string()
-    }
-
     #[test]
     fn valid_address_checks() {
         assert!(valid_address(A1));
@@ -973,6 +1039,14 @@ mod tests {
         assert!(!valid_address(&bad_chars));
         let bad_len = "1".repeat(34);
         assert!(!valid_address(&bad_len));
+    }
+
+    #[test]
+    fn address_from_secret_known_value() {
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        assert_eq!(addr, "1C6Rc3w25VHud3dLDamutaqfKWqhrLRTaD");
+        assert!(valid_address(&addr));
     }
 
     #[test]

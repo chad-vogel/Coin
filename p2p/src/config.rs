@@ -119,4 +119,25 @@ node_type: Wallet
         assert_eq!(addrs[0].port(), 9000);
         assert!(addrs[0].is_ipv6());
     }
+
+    #[test]
+    fn from_file_and_seed_peers() {
+        let yaml = r#"
+listeners:
+  - ip: "127.0.0.1"
+    port: 8000
+node_type: Wallet
+seed_peers:
+  - "192.168.1.2:7000"
+  - "localhost:7001"
+"#;
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), yaml).unwrap();
+        let cfg = Config::from_file(file.path().to_str().unwrap()).unwrap();
+        let addrs = cfg.seed_peer_addrs();
+        assert_eq!(addrs.len(), 2);
+        let ports: Vec<u16> = addrs.iter().map(|a| a.port()).collect();
+        assert!(ports.contains(&7000));
+        assert!(ports.contains(&7001));
+    }
 }

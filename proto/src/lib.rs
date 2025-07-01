@@ -77,6 +77,19 @@ pub struct Handshake {
     pub signature: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Vote {
+    pub validator: String,
+    pub block_hash: String,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Schedule {
+    pub slot: u64,
+    pub validator: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,5 +135,28 @@ mod tests {
         let data = serde_json::to_vec(&block).unwrap();
         let decoded: Block = serde_json::from_slice(&data).unwrap();
         assert_eq!(block, decoded);
+    }
+
+    #[test]
+    fn vote_roundtrip() {
+        let vote = Vote {
+            validator: "val".into(),
+            block_hash: "hash".into(),
+            signature: vec![1, 2, 3],
+        };
+        let data = serde_json::to_vec(&vote).unwrap();
+        let decoded: Vote = serde_json::from_slice(&data).unwrap();
+        assert_eq!(vote, decoded);
+    }
+
+    #[test]
+    fn schedule_roundtrip() {
+        let sched = Schedule {
+            slot: 1,
+            validator: "v".into(),
+        };
+        let data = serde_json::to_vec(&sched).unwrap();
+        let decoded: Schedule = serde_json::from_slice(&data).unwrap();
+        assert_eq!(sched, decoded);
     }
 }
