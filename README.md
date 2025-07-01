@@ -10,7 +10,7 @@ Blocks contain a header and a list of transactions. The header stores:
 
 - `previous_hash` – SHA256 hash of the preceding block
 - `merkle_root` – root of a Merkle tree over all transactions
-- `timestamp` – seconds since the Unix epoch
+- `timestamp` – milliseconds since the Unix epoch
 - `nonce` – value modified by miners to satisfy difficulty
 - `difficulty` – number of leading zero bits required in the block hash
 
@@ -35,7 +35,7 @@ block is produced it is broadcast to peers and appended to the local chain.
 ### Difficulty Adjustment
 
 `DIFFICULTY_WINDOW` recent blocks are examined each time a new block is added.
-If the average spacing between them is less than `TARGET_BLOCK_TIME` the
+If the average spacing between them is less than `TARGET_BLOCK_MS` the
 difficulty is increased; if it is greater, the difficulty decreases. This keeps
 block production close to the target interval.
 
