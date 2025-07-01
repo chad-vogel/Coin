@@ -19,6 +19,7 @@ serde_json = "1"
 coin-proto = { path = "../proto" }
 coin = { path = ".." }
 coin-p2p = { path = "../p2p" }
+rpassword = "7"
 
 [dev-dependencies]
 hex-literal = "0.4"

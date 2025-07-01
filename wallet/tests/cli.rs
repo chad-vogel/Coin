@@ -49,3 +49,39 @@ fn import_and_derive() {
     let addr = String::from_utf8(out.stdout).unwrap();
     assert!(matches!(addr.trim().len(), 33 | 34));
 }
+
+#[cfg(not(tarpaulin))]
+#[test]
+fn generate_and_derive_encrypted() {
+    let dir = tempfile::tempdir().unwrap();
+    let wallet = dir.path().join("enc.mnemonic");
+    Command::cargo_bin("cli")
+        .unwrap()
+        .args([
+            "--wallet",
+            wallet.to_str().unwrap(),
+            "--password",
+            "secret",
+            "generate",
+        ])
+        .assert()
+        .success();
+    assert!(wallet.exists());
+    let contents = std::fs::read_to_string(&wallet).unwrap();
+    assert!(!contents.contains(' '));
+    let out = Command::cargo_bin("cli")
+        .unwrap()
+        .args([
+            "--wallet",
+            wallet.to_str().unwrap(),
+            "--password",
+            "secret",
+            "derive",
+            "m/0'/0/0",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let addr = String::from_utf8(out.stdout).unwrap();
+    assert!(matches!(addr.trim().len(), 33 | 34));
+}

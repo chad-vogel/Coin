@@ -11,7 +11,10 @@ mod real_cli {
     use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
     use coin_proto::{Chain, GetChain, Handshake, Transaction};
     use coin_wallet::Wallet;
-    use rand::rngs::OsRng;
+    use hex;
+    use pbkdf2::pbkdf2_hmac;
+    use rand::{RngCore, rngs::OsRng};
+    use rpassword::prompt_password;
     use secp256k1::{PublicKey, Secp256k1, SecretKey};
     use sha2::{Digest, Sha256};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -22,6 +25,8 @@ mod real_cli {
     struct Cli {
         #[arg(long, default_value = "wallet.mnemonic")]
         wallet: String,
+        #[arg(long)]
+        password: Option<String>,
         #[command(subcommand)]
         command: Commands,
     }
@@ -53,12 +58,41 @@ mod real_cli {
         },
     }
 
-    fn write_wallet(path: &str, phrase: &str) -> Result<()> {
-        std::fs::write(path, phrase).map_err(Into::into)
+    fn write_wallet(path: &str, phrase: &str, password: &str) -> Result<()> {
+        if password.is_empty() {
+            return std::fs::write(path, phrase).map_err(Into::into);
+        }
+        let mut salt = [0u8; 16];
+        OsRng.fill_bytes(&mut salt);
+        let mut key = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, 100_000, &mut key);
+        let mut data = phrase.as_bytes().to_vec();
+        for (i, b) in data.iter_mut().enumerate() {
+            *b ^= key[i % key.len()];
+        }
+        let mut out = Vec::with_capacity(salt.len() + data.len());
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&data);
+        std::fs::write(path, hex::encode(out)).map_err(Into::into)
     }
 
-    fn load_wallet(path: &str) -> Result<Wallet> {
-        let phrase = std::fs::read_to_string(path)?;
+    fn load_wallet(path: &str, password: Option<&str>) -> Result<Wallet> {
+        let data = std::fs::read_to_string(path)?;
+        if data.trim().contains(' ') {
+            return Ok(Wallet::from_mnemonic(data.trim(), "").map_err(|e| anyhow!("{:?}", e))?);
+        }
+        let pw = password.ok_or_else(|| anyhow!("password required"))?;
+        let bytes = hex::decode(data.trim())?;
+        if bytes.len() < 16 {
+            return Err(anyhow!("invalid wallet file"));
+        }
+        let (salt, mut enc) = bytes.split_at(16);
+        let mut key = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(pw.as_bytes(), salt, 100_000, &mut key);
+        for (i, b) in enc.iter_mut().enumerate() {
+            *b ^= key[i % key.len()];
+        }
+        let phrase = String::from_utf8(enc.to_vec())?;
         Ok(Wallet::from_mnemonic(&phrase, "").map_err(|e| anyhow!("{:?}", e))?)
     }
 
@@ -170,17 +204,23 @@ mod real_cli {
         let cli = Cli::parse();
         match cli.command {
             Commands::Generate {} => {
+                let pwd = cli.password.clone().unwrap_or_else(|| {
+                    prompt_password("Password (empty for none): ").unwrap_or_default()
+                });
                 let wallet = Wallet::generate("").map_err(|e| anyhow!("{:?}", e))?;
                 let phrase = wallet.mnemonic().unwrap().phrase().to_string();
-                write_wallet(&cli.wallet, &phrase)?;
+                write_wallet(&cli.wallet, &phrase, &pwd)?;
                 println!("Mnemonic: {}", phrase);
             }
             Commands::Import { phrase } => {
+                let pwd = cli.password.clone().unwrap_or_else(|| {
+                    prompt_password("Password (empty for none): ").unwrap_or_default()
+                });
                 let wallet = Wallet::from_mnemonic(&phrase, "").map_err(|e| anyhow!("{:?}", e))?;
-                write_wallet(&cli.wallet, wallet.mnemonic().unwrap().phrase())?;
+                write_wallet(&cli.wallet, wallet.mnemonic().unwrap().phrase(), &pwd)?;
             }
             Commands::Derive { path } => {
-                let wallet = load_wallet(&cli.wallet)?;
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
                 let addr = wallet
                     .derive_address(&path)
                     .map_err(|e| anyhow!("{:?}", e))?;
@@ -194,7 +234,7 @@ mod real_cli {
                 let addr = if let Some(a) = address {
                     a
                 } else if let Some(p) = path {
-                    let wallet = load_wallet(&cli.wallet)?;
+                    let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
                     wallet.derive_address(&p).map_err(|e| anyhow!("{:?}", e))?
                 } else {
                     return Err(anyhow!("address or path required"));
@@ -213,7 +253,7 @@ mod real_cli {
                 path,
                 node,
             } => {
-                let wallet = load_wallet(&cli.wallet)?;
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
                 let child = wallet.derive_priv(&path).map_err(|e| anyhow!("{:?}", e))?;
                 let from = wallet
                     .derive_address(&path)
