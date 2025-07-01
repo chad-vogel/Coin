@@ -921,19 +921,35 @@ impl Node {
     }
 
     pub async fn handle_vote(&self, vote: &StakeVote) {
-        if let Some(hash) = self.consensus.lock().await.current_hash() {
-            if hash == vote.block_hash {
-                let reached = self.consensus.lock().await.register_vote(vote);
-                if reached {
-                    let mut chain = self.chain.lock().await;
-                    let _ = chain.save(&block_dir());
-                }
+        let finalized = {
+            let mut cs = self.consensus.lock().await;
+            if Some(&vote.block_hash) == cs.current_hash().as_ref() {
+                cs.register_vote(vote)
+            } else {
+                false
             }
+        };
+        if finalized {
+            let mut chain = self.chain.lock().await;
+            let _ = chain.save(&block_dir());
+            let slot = chain.len() as u64;
+            drop(chain);
+            let _ = self.broadcast_schedule(slot).await;
         }
     }
 
-    pub async fn broadcast_schedule(&self, slot: u64, validator: String) -> tokio::io::Result<()> {
-        let msg = RpcMessage::Schedule(coin_proto::Schedule { slot, validator });
+    pub async fn broadcast_schedule(&self, slot: u64) -> tokio::io::Result<()> {
+        let validator = {
+            let mut cs = self.consensus.lock().await;
+            cs.registry_mut().schedule(slot)
+        };
+        if validator.is_none() {
+            return Ok(());
+        }
+        let msg = RpcMessage::Schedule(coin_proto::Schedule {
+            slot,
+            validator: validator.unwrap(),
+        });
         let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
         for addr in list {
             if let Ok(mut stream) = self.connect_stream(addr).await {

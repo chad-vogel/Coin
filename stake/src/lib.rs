@@ -138,6 +138,7 @@ pub struct ConsensusState {
     registry: StakeRegistry,
     current_hash: Option<String>,
     votes: HashMap<String, u64>,
+    finalized: HashSet<String>,
 }
 
 impl ConsensusState {
@@ -146,6 +147,7 @@ impl ConsensusState {
             registry,
             current_hash: None,
             votes: HashMap::new(),
+            finalized: HashSet::new(),
         }
     }
 
@@ -167,7 +169,14 @@ impl ConsensusState {
             return false;
         }
         self.votes.insert(vote.validator.clone(), stake);
-        self.voted_stake() * 3 > self.registry.total_stake() * 2
+        if self.voted_stake() * 3 > self.registry.total_stake() * 2 {
+            if let Some(h) = self.current_hash.take() {
+                self.finalized.insert(h);
+            }
+            true
+        } else {
+            false
+        }
     }
 
     pub fn voted_stake(&self) -> u64 {
@@ -176,6 +185,14 @@ impl ConsensusState {
 
     pub fn registry_mut(&mut self) -> &mut StakeRegistry {
         &mut self.registry
+    }
+
+    pub fn is_finalized(&self, hash: &str) -> bool {
+        self.finalized.contains(hash)
+    }
+
+    pub fn finalized_blocks(&self) -> Vec<String> {
+        self.finalized.iter().cloned().collect()
     }
 }
 
@@ -227,6 +244,7 @@ mod tests {
         let mut v2 = Vote::new(addr2.clone(), "h".into());
         v2.sign(&sk2);
         assert!(cs.register_vote(&v2));
+        assert!(cs.is_finalized("h"));
     }
 
     #[test]
@@ -327,6 +345,7 @@ mod tests {
         v2.sign(&sk2);
         assert!(cs.register_vote(&v2));
         assert_eq!(cs.voted_stake(), 3);
+        assert!(cs.is_finalized("h"));
     }
 
     #[test]
