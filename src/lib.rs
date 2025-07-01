@@ -1399,6 +1399,40 @@ mod tests {
     }
 
     #[test]
+    fn prune_reduces_disk_usage() {
+        let mut bc = Blockchain::new();
+        for i in 0..3 {
+            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            bc.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: compute_merkle_root(&[tx.clone()]),
+                    timestamp: i as u64,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx],
+            });
+        }
+        let dir_before = tempfile::tempdir().unwrap();
+        bc.save(dir_before.path()).unwrap();
+        let size_before: u64 = std::fs::read_dir(dir_before.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| std::fs::metadata(e.path()).unwrap().len())
+            .sum();
+        bc.prune(1);
+        let dir_after = tempfile::tempdir().unwrap();
+        bc.save(dir_after.path()).unwrap();
+        let size_after: u64 = std::fs::read_dir(dir_after.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| std::fs::metadata(e.path()).unwrap().len())
+            .sum();
+        assert!(size_after < size_before);
+    }
+
+    #[test]
     fn validate_chain_accepts_correct_rewards() {
         let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();

@@ -20,6 +20,8 @@ calculating block hashes.
 Old blocks can prune stored transactions once they are buried under enough
 confirmations. Because only the Merkle root is included in the block hash,
 discarding transaction data does not invalidate the chain.
+Pruning never occurs on `Verifier` nodes, which retain the full blockchain
+history. Set `prune_depth` to `0` to disable pruning on other node types.
 
 ## Mining Protocol
 

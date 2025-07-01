@@ -61,7 +61,10 @@ async fn main() -> Result<()> {
     tokio::signal::ctrl_c().await?;
     node.shutdown();
     let handle = node.chain_handle();
-    let chain = handle.lock().await;
+    let mut chain = handle.lock().await;
+    if cfg.should_prune() {
+        chain.prune(cfg.prune_depth as usize);
+    }
     std::fs::create_dir_all(&cfg.block_dir)?;
     chain.save(&cfg.block_dir)?;
     node.save_peers().await?;
