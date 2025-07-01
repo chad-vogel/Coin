@@ -920,6 +920,18 @@ impl Node {
         Ok(())
     }
 
+    pub async fn handle_vote(&self, vote: &StakeVote) {
+        if let Some(hash) = self.consensus.lock().await.current_hash() {
+            if hash == vote.block_hash {
+                let reached = self.consensus.lock().await.register_vote(vote);
+                if reached {
+                    let mut chain = self.chain.lock().await;
+                    let _ = chain.save(&block_dir());
+                }
+            }
+        }
+    }
+
     pub async fn broadcast_schedule(&self, slot: u64, validator: String) -> tokio::io::Result<()> {
         let msg = RpcMessage::Schedule(coin_proto::Schedule { slot, validator });
         let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
