@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod blockfile;
 pub mod utils;
+pub mod utxofile;
 pub use utils::meets_difficulty;
 
 /// Compute the Merkle root of a set of hex-encoded transaction hashes.
@@ -640,6 +641,7 @@ impl Blockchain {
         for block in &self.chain {
             blockfile::append_block(dir, block)?;
         }
+        utxofile::save_utxos(dir.join("utxos.bin"), &self.utxos)?;
         Ok(())
     }
 
@@ -650,16 +652,21 @@ impl Blockchain {
     }
 
     pub fn load<P: AsRef<Path>>(dir: P) -> std::io::Result<Self> {
-        let blocks = blockfile::read_blocks(dir.as_ref())?;
+        let dir = dir.as_ref();
+        let blocks = blockfile::read_blocks(dir)?;
         if !Self::validate_chain(&blocks) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid chain",
             ));
         }
+        let saved_utxos = utxofile::load_utxos(dir.join("utxos.bin")).ok();
         let mut bc = Blockchain::new();
-        for block in blocks {
-            bc.add_block(block);
+        for block in &blocks {
+            bc.add_block(block.clone());
+        }
+        if let Some(map) = saved_utxos {
+            bc.utxos = map;
         }
         Ok(bc)
     }
@@ -745,6 +752,7 @@ impl Blockchain {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::collections::HashMap;
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
     const A2: &str = "1B1TKfsCkW5LQ6R1kSXUx7hLt49m1kwz75";
@@ -1354,9 +1362,55 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
+        std::fs::remove_file(dir.path().join("utxos.bin")).unwrap();
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(&addr1), bc.balance(&addr1));
         assert_eq!(loaded.balance(&addr2), bc.balance(&addr2));
+    }
+
+    #[test]
+    fn save_writes_utxo_file() {
+        let mut bc = Blockchain::new();
+        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        });
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        let path = dir.path().join("utxos.bin");
+        assert!(path.exists());
+        let stored = utxofile::load_utxos(&path).unwrap();
+        assert_eq!(stored, bc.utxos);
+    }
+
+    #[test]
+    fn load_uses_saved_utxos() {
+        let mut bc = Blockchain::new();
+        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        });
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        let mut map = HashMap::new();
+        map.insert(A1.to_string(), 123);
+        utxofile::save_utxos(dir.path().join("utxos.bin"), &map).unwrap();
+        let loaded = Blockchain::load(dir.path()).unwrap();
+        assert_eq!(loaded.balance(A1), 123);
     }
 
     #[test]
