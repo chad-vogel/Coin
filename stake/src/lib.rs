@@ -224,4 +224,81 @@ mod tests {
         v2.sign(&sk2);
         assert!(cs.register_vote(&v2));
     }
+
+    #[test]
+    fn registry_operations() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let mut bc = Blockchain::new();
+        bc.add_block(coin::Block {
+            header: coin::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy())],
+        });
+        let mut reg = StakeRegistry::new();
+        assert!(reg.stake(&mut bc, &addr, 10));
+        assert_eq!(reg.total_stake(), 10);
+        assert_eq!(reg.stake_of(&addr), 10);
+        assert_eq!(reg.validators().len(), 1);
+        assert_eq!(bc.locked_balance(&addr), 10);
+        assert_eq!(reg.schedule(0).as_deref(), Some(addr.as_str()));
+        assert_eq!(reg.unstake(&mut bc, &addr), 10);
+        assert_eq!(bc.locked_balance(&addr), 0);
+    }
+
+    #[test]
+    fn vote_verify_errors() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let mut v = Vote::new(addr.clone(), "h".into());
+        v.signature = vec![1, 2];
+        assert!(!v.verify());
+        v.signature = vec![0u8; 65];
+        assert!(!v.verify());
+    }
+
+    #[test]
+    fn schedule_and_consensus_logic() {
+        let sk1 = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr1 = address_from_secret(&sk1);
+        let addr2 = address_from_secret(&sk2);
+        let mut bc = Blockchain::new();
+        bc.add_block(coin::Block {
+            header: coin::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![
+                coin::coinbase_transaction(&addr1, bc.block_subsidy()),
+                coin::coinbase_transaction(&addr2, bc.block_subsidy()),
+            ],
+        });
+        let mut reg = StakeRegistry::new();
+        assert!(reg.stake(&mut bc, &addr1, 2));
+        assert!(reg.stake(&mut bc, &addr2, 1));
+        assert_eq!(reg.schedule(0).as_deref(), Some(addr1.as_str()));
+        assert_eq!(reg.schedule(2).as_deref(), Some(addr2.as_str()));
+        let mut cs = ConsensusState::new(reg);
+        cs.start_round("h".into());
+        let mut v = Vote::new(addr1.clone(), "bad".into());
+        v.sign(&sk1);
+        assert!(!cs.register_vote(&v));
+        cs.start_round("h".into());
+        let mut v1 = Vote::new(addr1.clone(), "h".into());
+        v1.sign(&sk1);
+        assert!(!cs.register_vote(&v1));
+        let mut v2 = Vote::new(addr2.clone(), "h".into());
+        v2.sign(&sk2);
+        assert!(cs.register_vote(&v2));
+        assert_eq!(cs.voted_stake(), 3);
+    }
 }

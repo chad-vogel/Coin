@@ -1008,6 +1008,14 @@ mod tests {
     }
 
     #[test]
+    fn address_from_secret_known_value() {
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        assert_eq!(addr, "1C6Rc3w25VHud3dLDamutaqfKWqhrLRTaD");
+        assert!(valid_address(&addr));
+    }
+
+    #[test]
     fn sign_and_verify_transaction() {
         let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let sender = address_from_secret(&sk);
