@@ -1,5 +1,7 @@
 use coin_p2p::rpc::{RpcMessage, decode_message, encode_message, read_rpc, write_rpc};
 use coin_proto::{Schedule, Vote};
+use jsonrpc_lite::JsonRpc;
+use serde_json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -60,4 +62,11 @@ async fn read_rpc_rejects_large_message() {
     let err = read_rpc(&mut stream).await.unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     client.await.unwrap();
+}
+
+#[test]
+fn decode_message_handles_multi_param_array() {
+    let json = r#"{"jsonrpc":"2.0","method":"peers","params":["a","b"]}"#;
+    let rpc: jsonrpc_lite::JsonRpc = serde_json::from_str(json).unwrap();
+    assert!(decode_message(rpc).is_none());
 }

@@ -263,6 +263,29 @@ mod tests {
     }
 
     #[test]
+    fn vote_verify_wrong_address() {
+        let sk1 = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr_wrong = address_from_secret(&sk2);
+        let mut v = Vote::new(addr_wrong, "h".into());
+        v.sign(&sk1);
+        assert!(!v.verify());
+    }
+
+    #[test]
+    fn register_vote_unknown_validator() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let reg = StakeRegistry::new();
+        let mut cs = ConsensusState::new(reg);
+        cs.start_round("h".into());
+        let mut v = Vote::new(addr.clone(), "h".into());
+        v.sign(&sk);
+        assert!(!cs.register_vote(&v));
+        assert_eq!(cs.current_hash().as_deref(), Some("h"));
+    }
+
+    #[test]
     fn schedule_and_consensus_logic() {
         let sk1 = SecretKey::from_slice(&[1u8; 32]).unwrap();
         let sk2 = SecretKey::from_slice(&[2u8; 32]).unwrap();
@@ -300,5 +323,21 @@ mod tests {
         v2.sign(&sk2);
         assert!(cs.register_vote(&v2));
         assert_eq!(cs.voted_stake(), 3);
+    }
+
+    #[test]
+    fn empty_registry_schedule_none() {
+        let reg = StakeRegistry::new();
+        assert!(reg.schedule(0).is_none());
+    }
+
+    #[test]
+    fn stake_rejects_invalid_inputs() {
+        let mut reg = StakeRegistry::new();
+        let mut bc = Blockchain::new();
+        assert!(!reg.stake(&mut bc, "bad", 10));
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        assert!(!reg.stake(&mut bc, &addr, 10));
     }
 }

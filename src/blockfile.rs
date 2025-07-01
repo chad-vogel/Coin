@@ -143,4 +143,35 @@ mod tests {
         let res = read_blocks(dir.path());
         assert!(res.is_err());
     }
+
+    #[test]
+    fn read_blocks_too_small() {
+        let dir = tempdir().unwrap();
+        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
+        file.write_all(&MAGIC_BYTES[..2]).unwrap();
+        let res = read_blocks(dir.path());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn read_blocks_length_mismatch() {
+        let dir = tempdir().unwrap();
+        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
+        file.write_all(&MAGIC_BYTES).unwrap();
+        file.write_all(&10u32.to_le_bytes()).unwrap();
+        file.write_all(&[0u8; 5]).unwrap();
+        let res = read_blocks(dir.path());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn read_blocks_decode_error() {
+        let dir = tempdir().unwrap();
+        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
+        file.write_all(&MAGIC_BYTES).unwrap();
+        file.write_all(&2u32.to_le_bytes()).unwrap();
+        file.write_all(&[0u8; 2]).unwrap();
+        let res = read_blocks(dir.path());
+        assert!(res.is_err());
+    }
 }

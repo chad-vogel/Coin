@@ -970,6 +970,40 @@ mod tests {
     }
 
     #[test]
+    fn save_removes_existing_block_files() {
+        let mut bc = Blockchain::new();
+        for _ in 0..2 {
+            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            bc.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: bc.last_block_hash().unwrap_or_default(),
+                    merkle_root: compute_merkle_root(&[tx.clone()]),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx],
+            });
+        }
+        let dir = tempfile::tempdir().unwrap();
+        bc.save(dir.path()).unwrap();
+        std::fs::write(dir.path().join("blk99999.dat"), b"junk").unwrap();
+        bc.save(dir.path()).unwrap();
+        let count = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_str()
+                    .unwrap()
+                    .starts_with("blk")
+            })
+            .count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
     fn load_rejects_invalid_chain() {
         let dir = tempfile::tempdir().unwrap();
         let block = Block {
