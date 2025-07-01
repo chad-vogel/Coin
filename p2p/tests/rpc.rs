@@ -1,5 +1,7 @@
 use coin_p2p::rpc::{RpcMessage, decode_message, encode_message, read_rpc, write_rpc};
-use coin_proto::{Schedule, Vote};
+use coin_proto::{
+    Balance, GetBalance, GetBlocks, GetTransaction, Schedule, Transaction, TransactionDetail, Vote,
+};
 use jsonrpc_lite::JsonRpc;
 use serde_json;
 use tokio::io::AsyncWriteExt;
@@ -29,6 +31,36 @@ fn vote_and_schedule_roundtrip() {
     let dec2 = decode_message(json2).unwrap();
     match dec2 {
         RpcMessage::Schedule(s2) => assert_eq!(s2, sched),
+        _ => panic!("wrong message"),
+    }
+
+    let bal_req = RpcMessage::GetBalance(GetBalance {
+        address: "addr".into(),
+    });
+    let json = encode_message(&bal_req);
+    let dec = decode_message(json).unwrap();
+    match dec {
+        RpcMessage::GetBalance(b) => assert_eq!(b.address, "addr"),
+        _ => panic!("wrong message"),
+    }
+
+    let tx_detail = TransactionDetail {
+        transaction: Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 1,
+            fee: 0,
+            signature: vec![],
+            encrypted_message: vec![],
+            inputs: vec![],
+            outputs: vec![],
+        },
+    };
+    let detail = RpcMessage::TransactionDetail(tx_detail.clone());
+    let json = encode_message(&detail);
+    let dec = decode_message(json).unwrap();
+    match dec {
+        RpcMessage::TransactionDetail(t) => assert_eq!(t, tx_detail),
         _ => panic!("wrong message"),
     }
 }
