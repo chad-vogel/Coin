@@ -1,5 +1,6 @@
 use bs58;
 pub use coin_proto::{Transaction, TransactionInput, TransactionOutput};
+use contract_runtime;
 use ripemd::Ripemd160;
 use secp256k1;
 use serde_json;
@@ -358,6 +359,7 @@ pub struct Blockchain {
     chain: Vec<Block>,
     mempool: Vec<Transaction>,
     difficulty: u32,
+    runtime: contract_runtime::Runtime,
     utxos: HashMap<String, u64>,
     locked: HashMap<String, u64>,
 }
@@ -367,6 +369,7 @@ impl Blockchain {
         Self {
             chain: Vec::new(),
             mempool: Vec::new(),
+            runtime: contract_runtime::Runtime::default(),
             difficulty: 1,
             utxos: HashMap::new(),
             locked: HashMap::new(),
@@ -495,6 +498,18 @@ impl Blockchain {
             for out in &tx.outputs {
                 let e = self.utxos.entry(out.address.clone()).or_insert(0);
                 *e += out.amount;
+            }
+
+            if tx.recipient.is_empty() && !tx.encrypted_message.is_empty() {
+                if let Ok(dep) =
+                    serde_json::from_slice::<contract_runtime::DeployPayload>(&tx.encrypted_message)
+                {
+                    let _ = self.runtime.deploy(&tx.sender, &dep.wasm);
+                } else if let Ok(inv) =
+                    serde_json::from_slice::<contract_runtime::InvokePayload>(&tx.encrypted_message)
+                {
+                    let _ = self.runtime.execute(&inv.contract);
+                }
             }
         }
         self.chain.push(block);

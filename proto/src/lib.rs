@@ -25,6 +25,15 @@ pub struct TransactionOutput {
     pub address: String,
     pub amount: u64,
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Deploy {
+    pub wasm: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Invoke {
+    pub contract: String,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ping;
