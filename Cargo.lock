@@ -318,10 +318,13 @@ dependencies = [
 name = "coin-http"
 version = "0.1.0"
 dependencies = [
+ "coin",
  "coin-p2p",
  "coin-proto",
  "hyper",
+ "rand 0.8.5",
  "reqwest",
+ "secp256k1",
  "serde",
  "serde_json",
  "tokio",

@@ -1,10 +1,40 @@
-use coin_p2p::rpc::{self, RpcMessage};
-use coin_proto::{GetBalance, GetBlocks, Transaction};
+use coin_p2p::rpc::{self, RpcMessage, read_rpc, write_rpc};
+use coin_p2p::sign_handshake;
+use coin_proto::{GetBalance, GetBlocks, Handshake, Transaction};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use rand::rngs::OsRng;
+use secp256k1::{Secp256k1, SecretKey};
 use std::convert::Infallible;
+use std::net::SocketAddr;
+use tokio::net::TcpStream;
+use tokio::time::{Duration, timeout};
 
-pub async fn handle_req(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn forward_rpc(node: SocketAddr, msg: &RpcMessage) -> std::io::Result<Option<RpcMessage>> {
+    let mut stream = TcpStream::connect(node).await?;
+    let mut rng = OsRng;
+    let sk = SecretKey::new(&mut rng);
+    let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+    let hs = RpcMessage::Handshake(Handshake {
+        network_id: "coin".into(),
+        version: 1,
+        public_key: pk.serialize().to_vec(),
+        signature: sign_handshake(&sk, "coin", 1),
+    });
+    write_rpc(&mut stream, &hs).await?;
+    let _ = read_rpc(&mut stream).await?;
+    write_rpc(&mut stream, msg).await?;
+    match timeout(Duration::from_secs(1), read_rpc(&mut stream)).await {
+        Ok(Ok(r)) => Ok(Some(r)),
+        Ok(Err(e)) => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+pub async fn handle_req(
+    req: Request<Body>,
+    node: SocketAddr,
+) -> Result<Response<Body>, Infallible> {
     let mut not_found = |msg| {
         Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -17,9 +47,18 @@ pub async fn handle_req(req: Request<Body>) -> Result<Response<Body>, Infallible
             let msg = RpcMessage::GetBalance(GetBalance {
                 address: addr.to_string(),
             });
-            let rpc = rpc::encode_message(&msg);
-            let body = serde_json::to_vec(&rpc).unwrap();
-            Ok(Response::new(Body::from(body)))
+            match forward_rpc(node, &msg).await {
+                Ok(Some(resp)) => {
+                    let rpc = rpc::encode_message(&resp);
+                    let body = serde_json::to_vec(&rpc).unwrap();
+                    Ok(Response::new(Body::from(body)))
+                }
+                Ok(None) => Ok(Response::new(Body::empty())),
+                Err(_) => Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("rpc error"))
+                    .unwrap()),
+            }
         }
         (&Method::GET, path) if path.starts_with("/getBlocks/") => {
             // format /getBlocks/start/end
@@ -30,9 +69,18 @@ pub async fn handle_req(req: Request<Body>) -> Result<Response<Body>, Infallible
             let start: u64 = parts[2].parse().unwrap_or(0);
             let end: u64 = parts[3].parse().unwrap_or(0);
             let msg = RpcMessage::GetBlocks(GetBlocks { start, end });
-            let rpc = rpc::encode_message(&msg);
-            let body = serde_json::to_vec(&rpc).unwrap();
-            Ok(Response::new(Body::from(body)))
+            match forward_rpc(node, &msg).await {
+                Ok(Some(resp)) => {
+                    let rpc = rpc::encode_message(&resp);
+                    let body = serde_json::to_vec(&rpc).unwrap();
+                    Ok(Response::new(Body::from(body)))
+                }
+                Ok(None) => Ok(Response::new(Body::empty())),
+                Err(_) => Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("rpc error"))
+                    .unwrap()),
+            }
         }
         (&Method::POST, "/sendTransaction") => {
             let data = hyper::body::to_bytes(req.into_body()).await.unwrap();
@@ -46,16 +94,29 @@ pub async fn handle_req(req: Request<Body>) -> Result<Response<Body>, Infallible
                 }
             };
             let msg = RpcMessage::Transaction(tx);
-            let rpc = rpc::encode_message(&msg);
-            let body = serde_json::to_vec(&rpc).unwrap();
-            Ok(Response::new(Body::from(body)))
+            match forward_rpc(node, &msg).await {
+                Ok(Some(resp)) => {
+                    let rpc = rpc::encode_message(&resp);
+                    let body = serde_json::to_vec(&rpc).unwrap();
+                    Ok(Response::new(Body::from(body)))
+                }
+                Ok(None) => Ok(Response::new(Body::empty())),
+                Err(_) => Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("rpc error"))
+                    .unwrap()),
+            }
         }
         _ => Ok(not_found("not found")),
     }
 }
 
-pub async fn serve(addr: &str) -> hyper::Result<()> {
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_req)) });
+pub async fn serve(addr: &str, node: &str) -> hyper::Result<()> {
+    let node_addr: SocketAddr = node.parse().expect("invalid node addr");
+    let make_svc = make_service_fn(move |_conn| {
+        let node = node_addr;
+        async move { Ok::<_, Infallible>(service_fn(move |req| handle_req(req, node))) }
+    });
     let server = Server::bind(&addr.parse().unwrap()).serve(make_svc);
     server.await
 }
