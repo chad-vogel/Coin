@@ -1209,6 +1209,19 @@ mod tests {
     }
 
     #[test]
+    fn merkle_root_empty_slice() {
+        let root = merkle_root_from_hashes(&[]);
+        assert_eq!(root, hex::encode(Sha256::digest(&[])));
+    }
+
+    #[test]
+    fn compute_merkle_single_tx() {
+        let tx = coinbase_transaction(A1, 1);
+        let root = compute_merkle_root(&[tx.clone()]);
+        assert_eq!(root, tx.hash());
+    }
+
+    #[test]
     fn prune_preserves_hash() {
         let bc = Blockchain::new();
         let tx = coinbase_transaction(A1, bc.block_subsidy());
