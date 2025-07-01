@@ -170,7 +170,8 @@ let wasm = wat::parse_str(wat).unwrap();
 // Deploy and run a contract
 let mut rt = Runtime::new();
 rt.deploy("alice", &wasm).unwrap();
-let result = rt.execute("alice").unwrap();
+let mut gas = 1_000_000;
+let result = rt.execute("alice", &mut gas).unwrap();
 assert_eq!(result, 42);
 
 // Helper constructors for transaction-based deployment and invocation

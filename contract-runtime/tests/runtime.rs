@@ -8,13 +8,16 @@ fn deploy_and_invoke() {
     let wasm = wat::parse_str(wat).expect("compile");
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).expect("deploy");
-    let result = rt.execute("alice").expect("execute");
+    let mut gas = 1_000;
+    let result = rt.execute("alice", &mut gas).expect("execute");
     assert_eq!(result, 42);
+    assert!(gas < 1_000);
 }
 #[test]
 fn execute_missing() {
     let mut rt = Runtime::new();
-    assert!(rt.execute("none").is_err());
+    let mut gas = 1;
+    assert!(rt.execute("none", &mut gas).is_err());
 }
 #[test]
 fn tx_helpers() {
@@ -42,6 +45,30 @@ fn state_persistence() {
     let wasm = wat::parse_str(wat).unwrap();
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).unwrap();
-    assert_eq!(rt.execute("alice").unwrap(), 1);
-    assert_eq!(rt.execute("alice").unwrap(), 2);
+    let mut gas = 10_000;
+    assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
+    assert!(gas < 10_000);
+    let mut gas2 = 10_000;
+    assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
+}
+
+#[test]
+fn out_of_gas() {
+    let wat = "(module (func (export \"main\") (result i32) i32.const 1))";
+    let wasm = wat::parse_str(wat).unwrap();
+    let mut rt = Runtime::new();
+    rt.deploy("carol", &wasm).unwrap();
+    let mut gas = 0;
+    assert!(rt.execute("carol", &mut gas).is_err());
+}
+
+#[test]
+fn gas_consumption() {
+    let wat = "(module (func (export \"main\")))";
+    let wasm = wat::parse_str(wat).unwrap();
+    let mut rt = Runtime::new();
+    rt.deploy("dave", &wasm).unwrap();
+    let mut gas = 1;
+    assert!(rt.execute("dave", &mut gas).is_ok());
+    assert_eq!(gas, 0);
 }

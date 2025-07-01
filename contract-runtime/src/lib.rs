@@ -2,7 +2,8 @@ use coin_proto::Transaction;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
-use wasmi::{Caller, Engine, Linker, Module, Store};
+use wasmi::core::TrapCode;
+use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 
 pub struct Runtime {
     engine: Engine,
@@ -18,8 +19,10 @@ impl Default for Runtime {
 
 impl Runtime {
     pub fn new() -> Self {
+        let mut config = Config::default();
+        config.consume_fuel(true);
         Self {
-            engine: Engine::default(),
+            engine: Engine::new(&config),
             modules: HashMap::new(),
             state: HashMap::new(),
         }
@@ -31,7 +34,7 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn execute(&mut self, addr: &str) -> anyhow::Result<i32> {
+    pub fn execute(&mut self, addr: &str, gas: &mut u64) -> anyhow::Result<i32> {
         let module = self
             .modules
             .get(addr)
@@ -39,6 +42,9 @@ impl Runtime {
 
         let state = self.state.get(addr).cloned().unwrap_or_default();
         let mut store = Store::new(&self.engine, state);
+        if *gas > 0 {
+            store.add_fuel(*gas).map_err(|e| anyhow::anyhow!(e))?;
+        }
         let mut linker = Linker::new(&self.engine);
         linker.func_wrap(
             "env",
@@ -56,7 +62,22 @@ impl Runtime {
         )?;
         let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
         let func = instance.get_typed_func::<(), i32>(&store, "main")?;
-        let result = func.call(&mut store, ())?;
+        let result = match func.call(&mut store, ()) {
+            Ok(res) => res,
+            Err(e) => {
+                if format!("{e}").contains("all fuel consumed") {
+                    return Err(anyhow::anyhow!("gas limit exceeded"));
+                }
+                return Err(anyhow::anyhow!(e));
+            }
+        };
+        if let Some(consumed) = store.fuel_consumed() {
+            if consumed > *gas {
+                *gas = 0;
+                return Err(anyhow::anyhow!("gas limit exceeded"));
+            }
+            *gas -= consumed;
+        }
         self.state.insert(addr.to_string(), store.data().clone());
         Ok(result)
     }
