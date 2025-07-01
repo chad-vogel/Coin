@@ -102,6 +102,11 @@ async fn finalize_block_on_votes() {
     if reached {
         node.chain_handle().lock().await.save(dir.path()).unwrap();
     }
+    {
+        let handle = node.consensus_handle();
+        let cs = handle.lock().await;
+        assert!(cs.is_finalized(&hash));
+    }
     sleep(Duration::from_millis(200)).await;
     let cs_handle = node.consensus_handle();
     let cs = cs_handle.lock().await;
