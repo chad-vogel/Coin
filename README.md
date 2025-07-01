@@ -151,6 +151,31 @@ Transactions can be signed and broadcasted:
 cargo run -p coin-wallet --bin cli -- send --to <ADDR> --amount 1 --path "m/0'/0/0" --node 127.0.0.1:9000
 ```
 
+## Smart Contracts
+
+The `contract-runtime` crate executes WebAssembly modules deployed on-chain.
+Contract bytecode is delivered via [`DeployPayload`](contract-runtime/src/lib.rs),
+and calls use [`InvokePayload`](contract-runtime/src/lib.rs). A [`Runtime`](contract-runtime/src/lib.rs)
+maintains deployed modules and exposes `deploy` and `execute` operations.
+
+```rust
+use contract_runtime::{Runtime, ContractTxExt};
+use coin_proto::Transaction;
+
+let wat = "(module (func (export \"main\") (result i32) i32.const 42))";
+let wasm = wat::parse_str(wat).unwrap();
+
+// Deploy and run a contract
+let mut rt = Runtime::new();
+rt.deploy("alice", &wasm).unwrap();
+let result = rt.execute("alice").unwrap();
+assert_eq!(result, 42);
+
+// Helper constructors for transaction-based deployment and invocation
+let deploy_tx: Transaction = ContractTxExt::deploy_tx("alice", wasm.clone());
+let invoke_tx: Transaction = ContractTxExt::invoke_tx("bob", "alice");
+```
+
 ## Development
 
 ```bash
