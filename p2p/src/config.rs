@@ -31,6 +31,8 @@ pub struct Config {
     pub max_peers: usize,
     #[serde(default)]
     pub mining_threads: Option<usize>,
+    #[serde(default = "default_prune_depth")]
+    pub prune_depth: usize,
 }
 
 fn default_block_dir() -> String {
@@ -51,6 +53,10 @@ fn default_max_msgs_per_sec() -> u32 {
 
 fn default_max_peers() -> usize {
     32
+}
+
+fn default_prune_depth() -> usize {
+    100
 }
 
 impl Config {
@@ -103,6 +109,7 @@ seed_peers:
         assert!(cfg.mining_threads.is_none());
         assert!(cfg.tor_proxy.is_none());
         assert_eq!(cfg.block_dir, "blocks");
+        assert_eq!(cfg.prune_depth, 100);
     }
 
     #[test]
