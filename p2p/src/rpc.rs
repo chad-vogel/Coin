@@ -157,3 +157,86 @@ pub async fn read_rpc(socket: &mut TcpStream) -> tokio::io::Result<RpcMessage> {
     decode_message(rpc)
         .ok_or_else(|| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, "invalid rpc"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn write_and_read_roundtrip() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            write_rpc(&mut stream, &RpcMessage::Ping).await.unwrap();
+        });
+
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let msg = read_rpc(&mut stream).await.unwrap();
+        assert!(matches!(msg, RpcMessage::Ping));
+        client.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_rpc_rejects_large_message() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            let len = (1024 * 1024 + 1u32).to_be_bytes();
+            stream.write_all(&len).await.unwrap();
+            stream.write_all(&vec![0u8; 1024 * 1024 + 1]).await.unwrap();
+        });
+
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let res = read_rpc(&mut stream).await;
+        assert!(res.is_err());
+        client.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_rpc_invalid_json() {
+        use tokio::io::AsyncWriteExt;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = tokio::spawn(async move {
+            let mut stream = TcpStream::connect(addr).await.unwrap();
+            stream.write_all(&5u32.to_be_bytes()).await.unwrap();
+            stream.write_all(b"hello").await.unwrap();
+        });
+
+        let (mut stream, _) = listener.accept().await.unwrap();
+        assert!(read_rpc(&mut stream).await.is_err());
+        client.await.unwrap();
+    }
+
+    #[test]
+    fn decode_unknown_method() {
+        let rpc = JsonRpc::notification("unknown");
+        assert!(decode_message(rpc).is_none());
+    }
+
+    #[test]
+    fn params_to_value_variants() {
+        use jsonrpc_lite::Params;
+        let val = params_to_value(Params::Array(vec![json!(1), json!(2)]));
+        assert!(matches!(val, Value::Array(a) if a.len() == 2));
+        let val = params_to_value(Params::None(()));
+        assert!(val.is_null());
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let msg = RpcMessage::GetBalance(GetBalance {
+            address: "a".into(),
+        });
+        let rpc = encode_message(&msg);
+        let decoded = decode_message(rpc).unwrap();
+        match decoded {
+            RpcMessage::GetBalance(g) => assert_eq!(g.address, "a"),
+            _ => panic!("wrong variant"),
+        }
+    }
+}

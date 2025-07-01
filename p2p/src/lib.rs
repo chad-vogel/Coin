@@ -2225,7 +2225,9 @@ mod tests {
 
     #[tokio::test]
     async fn mempool_file_restored_on_start() {
-        let _ = std::fs::remove_file("mempool.bin");
+        let dir = tempfile::tempdir().unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
         {
             let mut chain = Blockchain::new();
             chain.add_transaction(coinbase_transaction(A1, 5));
@@ -2249,7 +2251,7 @@ mod tests {
         let (_addrs, _) = node.start().await.unwrap();
         assert_eq!(node.chain.lock().await.mempool_len(), 1);
         assert!(!std::path::Path::new("mempool.bin").exists());
-        let _ = std::fs::remove_file("mempool.bin");
+        std::env::set_current_dir(prev).unwrap();
     }
 
     #[tokio::test]
