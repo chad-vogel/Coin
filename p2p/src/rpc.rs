@@ -1,6 +1,6 @@
 use coin_proto::{
-    Block, Chain, GetBlock, GetChain, GetPeers, Handshake, Peers, Ping, Pong, Schedule,
-    Transaction, Vote,
+    Balance, Block, Chain, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers, GetTransaction,
+    Handshake, Peers, Ping, Pong, Schedule, Transaction, TransactionDetail, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json::{Value, json};
@@ -16,8 +16,13 @@ pub enum RpcMessage {
     Peers(Peers),
     GetChain,
     GetBlock(GetBlock),
+    GetBlocks(GetBlocks),
+    GetBalance(GetBalance),
+    GetTransaction(GetTransaction),
     Chain(Chain),
     Block(Block),
+    Balance(Balance),
+    TransactionDetail(TransactionDetail),
     Vote(Vote),
     Schedule(Schedule),
     Handshake(Handshake),
@@ -32,8 +37,17 @@ pub fn encode_message(msg: &RpcMessage) -> JsonRpc {
         RpcMessage::Peers(p) => JsonRpc::notification_with_params("peers", json!(p)),
         RpcMessage::GetChain => JsonRpc::notification("getChain"),
         RpcMessage::GetBlock(g) => JsonRpc::notification_with_params("getBlock", json!(g)),
+        RpcMessage::GetBlocks(g) => JsonRpc::notification_with_params("getBlocks", json!(g)),
+        RpcMessage::GetBalance(g) => JsonRpc::notification_with_params("getBalance", json!(g)),
+        RpcMessage::GetTransaction(g) => {
+            JsonRpc::notification_with_params("getTransaction", json!(g))
+        }
         RpcMessage::Chain(c) => JsonRpc::notification_with_params("chain", json!(c)),
         RpcMessage::Block(b) => JsonRpc::notification_with_params("block", json!(b)),
+        RpcMessage::Balance(b) => JsonRpc::notification_with_params("balance", json!(b)),
+        RpcMessage::TransactionDetail(t) => {
+            JsonRpc::notification_with_params("transactionDetail", json!(t))
+        }
         RpcMessage::Vote(v) => JsonRpc::notification_with_params("vote", json!(v)),
         RpcMessage::Schedule(s) => JsonRpc::notification_with_params("schedule", json!(s)),
         RpcMessage::Handshake(h) => JsonRpc::notification_with_params("handshake", json!(h)),
@@ -58,6 +72,18 @@ pub fn decode_message(rpc: JsonRpc) -> Option<RpcMessage> {
             .get_params()
             .and_then(|p| serde_json::from_value::<GetBlock>(params_to_value(p)).ok())
             .map(RpcMessage::GetBlock),
+        "getBlocks" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<GetBlocks>(params_to_value(p)).ok())
+            .map(RpcMessage::GetBlocks),
+        "getBalance" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<GetBalance>(params_to_value(p)).ok())
+            .map(RpcMessage::GetBalance),
+        "getTransaction" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<GetTransaction>(params_to_value(p)).ok())
+            .map(RpcMessage::GetTransaction),
         "chain" => rpc
             .get_params()
             .and_then(|p| serde_json::from_value::<Chain>(params_to_value(p)).ok())
@@ -66,6 +92,14 @@ pub fn decode_message(rpc: JsonRpc) -> Option<RpcMessage> {
             .get_params()
             .and_then(|p| serde_json::from_value::<Block>(params_to_value(p)).ok())
             .map(RpcMessage::Block),
+        "balance" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<Balance>(params_to_value(p)).ok())
+            .map(RpcMessage::Balance),
+        "transactionDetail" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<TransactionDetail>(params_to_value(p)).ok())
+            .map(RpcMessage::TransactionDetail),
         "vote" => rpc
             .get_params()
             .and_then(|p| serde_json::from_value::<Vote>(params_to_value(p)).ok())

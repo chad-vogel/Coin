@@ -58,6 +58,32 @@ pub struct GetBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GetBlocks {
+    pub start: u64,
+    pub end: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GetBalance {
+    pub address: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Balance {
+    pub amount: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GetTransaction {
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransactionDetail {
+    pub transaction: Transaction,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Chain {
     pub blocks: Vec<Block>,
 }
@@ -167,5 +193,49 @@ mod tests {
         let data = serde_json::to_vec(&sched).unwrap();
         let decoded: Schedule = serde_json::from_slice(&data).unwrap();
         assert_eq!(sched, decoded);
+    }
+
+    #[test]
+    fn get_blocks_roundtrip() {
+        let req = GetBlocks { start: 1, end: 2 };
+        let data = serde_json::to_vec(&req).unwrap();
+        let decoded: GetBlocks = serde_json::from_slice(&data).unwrap();
+        assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn balance_roundtrip() {
+        let bal = Balance { amount: 42 };
+        let data = serde_json::to_vec(&bal).unwrap();
+        let decoded: Balance = serde_json::from_slice(&data).unwrap();
+        assert_eq!(bal, decoded);
+    }
+
+    #[test]
+    fn get_transaction_roundtrip() {
+        let req = GetTransaction { hash: "h".into() };
+        let data = serde_json::to_vec(&req).unwrap();
+        let decoded: GetTransaction = serde_json::from_slice(&data).unwrap();
+        assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn transaction_detail_roundtrip() {
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 1,
+            fee: 0,
+            signature: vec![],
+            encrypted_message: vec![],
+            inputs: vec![],
+            outputs: vec![],
+        };
+        let detail = TransactionDetail {
+            transaction: tx.clone(),
+        };
+        let data = serde_json::to_vec(&detail).unwrap();
+        let decoded: TransactionDetail = serde_json::from_slice(&data).unwrap();
+        assert_eq!(detail, decoded);
     }
 }

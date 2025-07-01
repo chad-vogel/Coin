@@ -2,7 +2,10 @@ use crate::rpc::{RpcMessage, read_rpc, write_rpc};
 use clap::ValueEnum;
 use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt, compute_merkle_root};
-use coin_proto::{Chain, GetBlock, GetChain, GetPeers, Handshake, Peers, Ping, Pong, Transaction};
+use coin_proto::{
+    Balance, Chain, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers, GetTransaction, Handshake,
+    Peers, Ping, Pong, Transaction, TransactionDetail,
+};
 use hex;
 use miner::{mine_block, mine_block_threads};
 use rand::rngs::OsRng;
@@ -690,6 +693,43 @@ impl Node {
                                                     let _ = write_msg(&mut socket, &msg).await;
                                                 }
                                             }
+                                            RpcMessage::GetBlocks(g) => {
+                                                let blocks = chain.lock().await.all();
+                                                let range = g.start as usize..=g.end as usize;
+                                                let rpc_blocks: Vec<coin_proto::Block> = blocks
+                                                    .into_iter()
+                                                    .enumerate()
+                                                    .filter(|(i, _)| range.contains(i))
+                                                    .map(|(_, b)| b.to_rpc())
+                                                    .collect();
+                                                if !rpc_blocks.is_empty() {
+                                                    let msg = RpcMessage::Chain(Chain {
+                                                        blocks: rpc_blocks,
+                                                    });
+                                                    let _ = write_msg(&mut socket, &msg).await;
+                                                }
+                                            }
+                                            RpcMessage::GetBalance(g) => {
+                                                let bal = chain.lock().await.balance(&g.address);
+                                                let msg =
+                                                    RpcMessage::Balance(Balance { amount: bal });
+                                                let _ = write_msg(&mut socket, &msg).await;
+                                            }
+                                            RpcMessage::GetTransaction(g) => {
+                                                let blocks = chain.lock().await.all();
+                                                if let Some(tx) = blocks
+                                                    .iter()
+                                                    .flat_map(|b| &b.transactions)
+                                                    .find(|t| t.hash() == g.hash)
+                                                {
+                                                    let msg = RpcMessage::TransactionDetail(
+                                                        TransactionDetail {
+                                                            transaction: tx.clone(),
+                                                        },
+                                                    );
+                                                    let _ = write_msg(&mut socket, &msg).await;
+                                                }
+                                            }
                                             RpcMessage::Chain(c) => {
                                                 let blocks: Vec<Block> = c
                                                     .blocks
@@ -727,6 +767,8 @@ impl Node {
                                                 }
                                             }
                                             RpcMessage::Schedule(_) => {}
+                                            RpcMessage::Balance(_) => {}
+                                            RpcMessage::TransactionDetail(_) => {}
                                             RpcMessage::Handshake(_) => {}
                                         }
                                     }
@@ -2161,5 +2203,176 @@ mod tests {
         let (_addrs, _) = node.start().await.unwrap();
         assert_eq!(node.chain.lock().await.mempool_len(), 1);
         assert!(!std::path::Path::new("mempool.bin").exists());
+    }
+
+    #[tokio::test]
+    async fn get_balance_returns_value() {
+        let _ = std::fs::remove_file("mempool.bin");
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let reward = {
+            let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![coinbase_transaction(A1, reward)],
+            });
+            reward
+        };
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+        let hs = RpcMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let get = RpcMessage::GetBalance(GetBalance { address: A1.into() });
+        write_msg(&mut stream, &get).await.unwrap();
+        match read_msg(&mut stream).await.unwrap() {
+            RpcMessage::Balance(b) => assert_eq!(b.amount, reward as i64),
+            other => panic!("expected Balance, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_blocks_returns_subset() {
+        let _ = std::fs::remove_file("mempool.bin");
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        {
+            let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
+            for _ in 0..3 {
+                let prev = chain.last_block_hash().unwrap_or_default();
+                chain.add_block(Block {
+                    header: BlockHeader {
+                        previous_hash: prev,
+                        merkle_root: String::new(),
+                        timestamp: 0,
+                        nonce: 0,
+                        difficulty: 0,
+                    },
+                    transactions: vec![coinbase_transaction(A1, reward)],
+                });
+            }
+        }
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+        let hs = RpcMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let get = RpcMessage::GetBlocks(GetBlocks { start: 1, end: 2 });
+        write_msg(&mut stream, &get).await.unwrap();
+        match read_msg(&mut stream).await.unwrap() {
+            RpcMessage::Chain(c) => assert_eq!(c.blocks.len(), 2),
+            other => panic!("expected Chain, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn get_transaction_returns_tx() {
+        let _ = std::fs::remove_file("mempool.bin");
+        let node = Node::new(
+            vec!["0.0.0.0:0".parse().unwrap()],
+            NodeType::Wallet,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let (addrs, _) = node.start().await.unwrap();
+        let addr = addrs[0];
+        let tx_hash = {
+            let mut chain = node.chain.lock().await;
+            let reward = chain.block_subsidy();
+            let tx = coinbase_transaction(A1, reward);
+            let hash = tx.hash();
+            chain.add_block(Block {
+                header: BlockHeader {
+                    previous_hash: String::new(),
+                    merkle_root: String::new(),
+                    timestamp: 0,
+                    nonce: 0,
+                    difficulty: 0,
+                },
+                transactions: vec![tx.clone()],
+            });
+            hash
+        };
+
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let mut rng = OsRng;
+        let sk = secp256k1::SecretKey::new(&mut rng);
+        let pk = secp256k1::PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+        let hs = RpcMessage::Handshake(Handshake {
+            network_id: "coin".into(),
+            version: 1,
+            public_key: pk.serialize().to_vec(),
+            signature: sign_handshake(&sk, "coin", 1),
+        });
+        write_msg(&mut stream, &hs).await.unwrap();
+        let _ = read_msg(&mut stream).await.unwrap();
+
+        let get = RpcMessage::GetTransaction(GetTransaction {
+            hash: tx_hash.clone(),
+        });
+        write_msg(&mut stream, &get).await.unwrap();
+        match read_msg(&mut stream).await.unwrap() {
+            RpcMessage::TransactionDetail(t) => assert_eq!(t.transaction.hash(), tx_hash),
+            other => panic!("expected TransactionDetail, got {:?}", other),
+        }
     }
 }
