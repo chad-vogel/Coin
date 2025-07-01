@@ -1,11 +1,13 @@
 use coin_proto::Transaction;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use wasmi::{Engine, Linker, Module, Store};
+use std::collections::HashMap;
+use wasmi::{Caller, Engine, Linker, Module, Store};
 
 pub struct Runtime {
     engine: Engine,
-    modules: std::collections::HashMap<String, Module>,
+    modules: HashMap<String, Module>,
+    state: HashMap<String, HashMap<i32, i32>>,
 }
 
 impl Default for Runtime {
@@ -18,7 +20,8 @@ impl Runtime {
     pub fn new() -> Self {
         Self {
             engine: Engine::default(),
-            modules: std::collections::HashMap::new(),
+            modules: HashMap::new(),
+            state: HashMap::new(),
         }
     }
 
@@ -28,16 +31,34 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn execute(&self, addr: &str) -> anyhow::Result<i32> {
+    pub fn execute(&mut self, addr: &str) -> anyhow::Result<i32> {
         let module = self
             .modules
             .get(addr)
             .ok_or_else(|| anyhow::anyhow!("module not found"))?;
-        let mut store = Store::new(&self.engine, ());
+
+        let state = self.state.get(addr).cloned().unwrap_or_default();
+        let mut store = Store::new(&self.engine, state);
         let mut linker = Linker::new(&self.engine);
+        linker.func_wrap(
+            "env",
+            "get",
+            |caller: Caller<'_, HashMap<i32, i32>>, key: i32| {
+                *caller.data().get(&key).unwrap_or(&0)
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set",
+            |mut caller: Caller<'_, HashMap<i32, i32>>, key: i32, val: i32| {
+                caller.data_mut().insert(key, val);
+            },
+        )?;
         let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
         let func = instance.get_typed_func::<(), i32>(&store, "main")?;
-        Ok(func.call(&mut store, ())?)
+        let result = func.call(&mut store, ())?;
+        self.state.insert(addr.to_string(), store.data().clone());
+        Ok(result)
     }
 }
 

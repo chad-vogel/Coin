@@ -34,6 +34,36 @@ fn verify_detects_tampered_sig() {
     assert!(!verify_handshake(&hs));
 }
 
+#[test]
+fn verify_rejects_bad_length() {
+    let mut rng = OsRng;
+    let sk = SecretKey::new(&mut rng);
+    let pk = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
+    let mut sig = sign_handshake(&sk, "coin", 1);
+    sig.pop();
+    let hs = Handshake {
+        network_id: "coin".into(),
+        version: 1,
+        public_key: pk.serialize().to_vec(),
+        signature: sig,
+    };
+    assert!(!verify_handshake(&hs));
+}
+
+#[test]
+fn verify_rejects_bad_pubkey() {
+    let mut rng = OsRng;
+    let sk = SecretKey::new(&mut rng);
+    let sig = sign_handshake(&sk, "coin", 1);
+    let hs = Handshake {
+        network_id: "coin".into(),
+        version: 1,
+        public_key: vec![0u8; 30],
+        signature: sig,
+    };
+    assert!(!verify_handshake(&hs));
+}
+
 #[tokio::test]
 async fn node_rejects_mismatched_handshake() {
     let node_a = Node::new(
