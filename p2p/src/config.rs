@@ -29,8 +29,8 @@ pub struct Config {
     pub max_msgs_per_sec: u32,
     #[serde(default = "default_max_peers")]
     pub max_peers: usize,
-    #[serde(default = "default_mining_threads")]
-    pub mining_threads: usize,
+    #[serde(default)]
+    pub mining_threads: Option<usize>,
 }
 
 fn default_block_dir() -> String {
@@ -51,12 +51,6 @@ fn default_max_msgs_per_sec() -> u32 {
 
 fn default_max_peers() -> usize {
     32
-}
-
-fn default_mining_threads() -> usize {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
 }
 
 impl Config {
@@ -106,7 +100,7 @@ seed_peers:
         assert_eq!(cfg.protocol_version, 1);
         assert_eq!(cfg.max_msgs_per_sec, 10);
         assert_eq!(cfg.max_peers, 32);
-        assert!(cfg.mining_threads >= 1);
+        assert!(cfg.mining_threads.is_none());
         assert!(cfg.tor_proxy.is_none());
         assert_eq!(cfg.block_dir, "blocks");
     }

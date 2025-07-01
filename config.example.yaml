@@ -12,7 +12,8 @@ block_dir: "blocks"
 seed_peers:
   - "127.0.0.1:9001"
 max_msgs_per_sec: 10
+# mining_threads is optional. When omitted, all CPU cores are used.
 max_peers: 32
-mining_threads: 1
+# mining_threads: 4
 # Optional SOCKS5 proxy (Tor). Example: "127.0.0.1:9050"
 tor_proxy: null
