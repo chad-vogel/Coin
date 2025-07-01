@@ -45,7 +45,10 @@ async fn finalize_block_on_votes() {
         None,
     );
     let (addrs, _) = node.start().await.unwrap();
-    let addr = addrs[0];
+    let mut addr = addrs[0];
+    if addr.ip().is_unspecified() {
+        addr = std::net::SocketAddr::new("127.0.0.1".parse().unwrap(), addr.port());
+    }
     {
         let chain_handle = node.chain_handle();
         let mut chain = chain_handle.lock().await;
@@ -126,4 +129,5 @@ async fn finalize_block_on_votes() {
     drop(cs);
     let saved = Blockchain::load(dir.path()).unwrap_or_else(|e| panic!("{:?}", e));
     assert_eq!(saved.len(), 2);
+    node.shutdown();
 }
