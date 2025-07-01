@@ -1,5 +1,13 @@
 [workspace]
-members = ["proto", "p2p", "miner", "wallet", "stake", "contract-runtime"]
+members = [
+    "proto",
+    "p2p",
+    "miner",
+    "wallet",
+    "stake",
+    "contract-runtime",
+    "http-api",
+]
 
 [package]
 name = "coin"
