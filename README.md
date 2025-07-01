@@ -79,6 +79,9 @@ Field descriptions:
 - `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
 - `block_dir` – directory where block files are stored.
 - `seed_peers` – peers contacted on startup for bootstrapping.
+- `mining_threads` – optional number of threads used for mining. When omitted,
+  the miner automatically utilizes all available CPU cores. Faster hardware or
+  more threads will generally lead to shorter block times.
 
 ## Tor Usage
 

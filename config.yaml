@@ -8,5 +8,7 @@ seed_peers:
   - "127.0.0.1:9001"
 max_msgs_per_sec: 10
 max_peers: 32
-mining_threads: 1
+# mining_threads controls the number of CPU threads used for mining.
+# When omitted the software automatically uses all available cores.
+# mining_threads: 4
 tor_proxy: null

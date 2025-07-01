@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         Some(cfg.protocol_version),
         Some(cfg.max_msgs_per_sec),
         Some(cfg.max_peers),
-        Some(cfg.mining_threads),
+        cfg.mining_threads,
     );
     if let Ok(chain) = Blockchain::load(&cfg.block_dir) {
         *node.chain_handle().lock().await = chain;
