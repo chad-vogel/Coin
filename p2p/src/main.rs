@@ -62,7 +62,9 @@ async fn main() -> Result<()> {
     node.shutdown();
     let handle = node.chain_handle();
     let mut chain = handle.lock().await;
-    chain.prune(cfg.prune_depth as usize);
+    if cfg.should_prune() {
+        chain.prune(cfg.prune_depth as usize);
+    }
     std::fs::create_dir_all(&cfg.block_dir)?;
     chain.save(&cfg.block_dir)?;
     node.save_peers().await?;

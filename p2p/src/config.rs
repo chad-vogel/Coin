@@ -65,6 +65,12 @@ impl Config {
         Ok(serde_yaml::from_reader(file)?)
     }
 
+    /// Returns true if pruning should be performed based on the node type and
+    /// configured depth. Full verifier nodes keep the entire chain.
+    pub fn should_prune(&self) -> bool {
+        self.prune_depth > 0 && self.node_type != NodeType::Verifier
+    }
+
     pub fn listener_addrs(&self) -> Vec<SocketAddr> {
         self.listeners
             .iter()
@@ -110,6 +116,45 @@ seed_peers:
         assert!(cfg.tor_proxy.is_none());
         assert_eq!(cfg.block_dir, "blocks");
         assert_eq!(cfg.prune_depth, 100);
+    }
+
+    #[test]
+    fn should_prune_true_for_miner() {
+        let yaml = r#"
+listeners:
+  - ip: "0.0.0.0"
+    port: 8000
+node_type: Miner
+prune_depth: 10
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.should_prune());
+    }
+
+    #[test]
+    fn should_prune_false_for_verifier() {
+        let yaml = r#"
+listeners:
+  - ip: "0.0.0.0"
+    port: 8000
+node_type: Verifier
+prune_depth: 10
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.should_prune());
+    }
+
+    #[test]
+    fn should_prune_false_for_zero_depth() {
+        let yaml = r#"
+listeners:
+  - ip: "0.0.0.0"
+    port: 8000
+node_type: Miner
+prune_depth: 0
+"#;
+        let cfg: Config = serde_yaml::from_str(yaml).unwrap();
+        assert!(!cfg.should_prune());
     }
 
     #[test]
