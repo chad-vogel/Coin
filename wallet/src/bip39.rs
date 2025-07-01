@@ -12,6 +12,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy)]
 pub enum Language {
     English,
+    ChineseSimplified,
+    Spanish,
+    French,
+    Russian,
 }
 
 impl Default for Language {
@@ -26,9 +30,10 @@ pub struct Mnemonic {
 }
 
 impl Mnemonic {
-    pub fn new(phrase: &str, _lang: Language) -> Result<Self> {
+    pub fn new(phrase: &str, lang: Language) -> Result<Self> {
+        let wl = wordlist(lang);
         for w in phrase.split_whitespace() {
-            if !WORDLIST.contains(&w) {
+            if !wl.contains(&w) {
                 return Err(Error::InvalidWord(w.to_string()));
             }
         }
@@ -37,11 +42,12 @@ impl Mnemonic {
         })
     }
 
-    pub fn random<R: RngCore>(rng: &mut R, _lang: Language) -> Self {
+    pub fn random<R: RngCore>(rng: &mut R, lang: Language) -> Self {
+        let wl = wordlist(lang);
         let mut words = Vec::with_capacity(24);
         for _ in 0..24 {
-            let idx = (rng.next_u32() as usize) % WORDLIST.len();
-            words.push(WORDLIST[idx]);
+            let idx = (rng.next_u32() as usize) % wl.len();
+            words.push(wl[idx]);
         }
         Mnemonic {
             phrase: words.join(" "),
@@ -60,7 +66,21 @@ impl Mnemonic {
     }
 }
 
-const WORDLIST: [&str; 2048] = include!("wordlist.in");
+const WORDLIST_ENGLISH: [&str; 2048] = include!("wordlist.in");
+const WORDLIST_CHINESE_SIMPLIFIED: [&str; 2048] = include!("wordlist_chinese_simplified.in");
+const WORDLIST_SPANISH: [&str; 2048] = include!("wordlist_spanish.in");
+const WORDLIST_FRENCH: [&str; 2048] = include!("wordlist_french.in");
+const WORDLIST_RUSSIAN: [&str; 2048] = include!("wordlist_russian.in");
+
+fn wordlist(lang: Language) -> &'static [&'static str; 2048] {
+    match lang {
+        Language::English => &WORDLIST_ENGLISH,
+        Language::ChineseSimplified => &WORDLIST_CHINESE_SIMPLIFIED,
+        Language::Spanish => &WORDLIST_SPANISH,
+        Language::French => &WORDLIST_FRENCH,
+        Language::Russian => &WORDLIST_RUSSIAN,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -72,7 +92,7 @@ mod tests {
         // StepRng with zero increment yields the same value on each call
         let mut rng = StepRng::new(1, 0);
         let m = Mnemonic::random(&mut rng, Language::English);
-        let expected_word = WORDLIST[1];
+        let expected_word = WORDLIST_ENGLISH[1];
         let expected = std::iter::repeat(expected_word)
             .take(24)
             .collect::<Vec<_>>()
@@ -91,5 +111,43 @@ mod tests {
     fn invalid_word_fails() {
         let res = Mnemonic::new("abandon foobar", Language::English);
         assert!(matches!(res, Err(Error::InvalidWord(ref w)) if w == "foobar"));
+    }
+
+    #[test]
+    fn spanish_roundtrip() {
+        let phrase = WORDLIST_SPANISH[..24].join(" ");
+        let m = Mnemonic::new(&phrase, Language::Spanish).unwrap();
+        assert_eq!(m.phrase(), phrase);
+        let mut rng = StepRng::new(1, 0);
+        let r = Mnemonic::random(&mut rng, Language::Spanish);
+        let expected = WORDLIST_SPANISH[1];
+        assert!(r.phrase().split_whitespace().all(|w| w == expected));
+    }
+
+    #[test]
+    fn chinese_random() {
+        let mut rng = StepRng::new(1, 0);
+        let m = Mnemonic::random(&mut rng, Language::ChineseSimplified);
+        let expected = WORDLIST_CHINESE_SIMPLIFIED[1];
+        assert!(m.phrase().split_whitespace().all(|w| w == expected));
+    }
+
+    #[test]
+    fn french_roundtrip() {
+        let phrase = WORDLIST_FRENCH[..24].join(" ");
+        let m = Mnemonic::new(&phrase, Language::French).unwrap();
+        assert_eq!(m.phrase(), phrase);
+        let mut rng = StepRng::new(1, 0);
+        let r = Mnemonic::random(&mut rng, Language::French);
+        let expected = WORDLIST_FRENCH[1];
+        assert!(r.phrase().split_whitespace().all(|w| w == expected));
+    }
+
+    #[test]
+    fn russian_random() {
+        let mut rng = StepRng::new(1, 0);
+        let m = Mnemonic::random(&mut rng, Language::Russian);
+        let expected = WORDLIST_RUSSIAN[1];
+        assert!(m.phrase().split_whitespace().all(|w| w == expected));
     }
 }
