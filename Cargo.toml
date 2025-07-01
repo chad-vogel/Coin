@@ -1,5 +1,5 @@
 [workspace]
-members = ["proto", "p2p", "miner", "wallet", "stake"]
+members = ["proto", "p2p", "miner", "wallet", "stake", "contract-runtime"]
 
 [package]
 name = "coin"
@@ -16,6 +16,7 @@ serde_json = "1"
 secp256k1 = { version = "0.27", features = ["recovery"] }
 ripemd = "0.1"
 bincode = "1"
+contract-runtime = { path = "contract-runtime" }
 
 [dev-dependencies]
 tempfile = "3"
