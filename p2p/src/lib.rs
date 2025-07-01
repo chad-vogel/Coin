@@ -33,6 +33,10 @@ const DEFAULT_MAX_PEERS: usize = 32;
 const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
 const MAX_TIME_DRIFT_MS: i64 = 2 * 60 * 60 * 1000; // 2 hours
 
+fn block_dir() -> String {
+    std::env::var("BLOCK_DIR").unwrap_or_else(|_| "blocks".to_string())
+}
+
 /// Send a length-prefixed JSON-RPC message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
     write_rpc(socket, msg).await
@@ -310,6 +314,10 @@ impl Node {
         self.chain.clone()
     }
 
+    pub fn consensus_handle(&self) -> Arc<Mutex<ConsensusState>> {
+        self.consensus.clone()
+    }
+
     async fn connect_stream(&self, addr: SocketAddr) -> tokio::io::Result<TcpStream> {
         connect_with_proxy(addr, self.tor_proxy).await
     }
@@ -440,6 +448,7 @@ impl Node {
         let key = self.node_key.clone();
         let pubk = self.node_pub.clone();
         let running = self.running.clone();
+        let consensus = self.consensus.clone();
         tokio::spawn(async move {
             loop {
                 if !running.load(Ordering::SeqCst) {
@@ -503,6 +512,7 @@ impl Node {
         let node_key = self.node_key.clone();
         let node_pub = self.node_pub.clone();
         let running = self.running.clone();
+        let consensus = self.consensus.clone();
         tokio::spawn(async move {
             loop {
                 if !running.load(Ordering::SeqCst) {
@@ -515,6 +525,7 @@ impl Node {
                     let mut chain = chain.lock().await;
                     if chain.len() == 0 || chain.mempool_len() > 0 {
                         let block = mine_block_threads(&mut chain, &reward, threads);
+                        let hash = block.hash();
                         broadcast_block_internal(
                             peers.clone(),
                             &block,
@@ -525,6 +536,7 @@ impl Node {
                             proxy,
                         )
                         .await;
+                        consensus.lock().await.start_round(hash);
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -745,7 +757,9 @@ impl Node {
                                                 if let Some(block) = Block::from_rpc(b) {
                                                     let mut chain = chain.lock().await;
                                                     if valid_block(&chain, &block) {
+                                                        let hash = block.hash();
                                                         chain.add_block(block);
+                                                        consensus.lock().await.start_round(hash);
                                                     }
                                                 }
                                             }
@@ -764,7 +778,8 @@ impl Node {
                                                             .await
                                                             .register_vote(&vote);
                                                         if reached {
-                                                            // finalized block
+                                                            let mut chain = chain.lock().await;
+                                                            let _ = chain.save(&block_dir());
                                                         }
                                                     }
                                                 }

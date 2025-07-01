@@ -173,6 +173,10 @@ impl ConsensusState {
     pub fn voted_stake(&self) -> u64 {
         self.votes.values().sum()
     }
+
+    pub fn registry_mut(&mut self) -> &mut StakeRegistry {
+        &mut self.registry
+    }
 }
 
 #[cfg(test)]
