@@ -2249,6 +2249,7 @@ mod tests {
         let (_addrs, _) = node.start().await.unwrap();
         assert_eq!(node.chain.lock().await.mempool_len(), 1);
         assert!(!std::path::Path::new("mempool.bin").exists());
+        let _ = std::fs::remove_file("mempool.bin");
     }
 
     #[tokio::test]
