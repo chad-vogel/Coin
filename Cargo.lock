@@ -316,6 +316,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "stake",
  "tempfile",
  "tokio",
  "tokio-socks",
@@ -338,6 +339,7 @@ dependencies = [
  "bs58",
  "clap",
  "coin",
+ "coin-p2p",
  "coin-proto",
  "hex",
  "hex-literal",
@@ -1088,6 +1090,17 @@ checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "stake"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "coin",
+ "ripemd",
+ "secp256k1",
+ "sha2",
 ]
 
 [[package]]

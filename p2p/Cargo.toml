@@ -20,6 +20,7 @@ serde_yaml = "0.9"
 tokio-socks = "0.5"
 bincode = "1"
 jsonrpc-lite = "0.6.1"
+stake = { path = "../stake" }
 
 [dev-dependencies]
 coin-wallet = { path = "../wallet" }
