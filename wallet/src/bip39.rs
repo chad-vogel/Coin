@@ -14,6 +14,8 @@ pub enum Language {
     English,
     ChineseSimplified,
     Spanish,
+    French,
+    Russian,
 }
 
 impl Default for Language {
@@ -67,12 +69,16 @@ impl Mnemonic {
 const WORDLIST_ENGLISH: [&str; 2048] = include!("wordlist.in");
 const WORDLIST_CHINESE_SIMPLIFIED: [&str; 2048] = include!("wordlist_chinese_simplified.in");
 const WORDLIST_SPANISH: [&str; 2048] = include!("wordlist_spanish.in");
+const WORDLIST_FRENCH: [&str; 2048] = include!("wordlist_french.in");
+const WORDLIST_RUSSIAN: [&str; 2048] = include!("wordlist_russian.in");
 
 fn wordlist(lang: Language) -> &'static [&'static str; 2048] {
     match lang {
         Language::English => &WORDLIST_ENGLISH,
         Language::ChineseSimplified => &WORDLIST_CHINESE_SIMPLIFIED,
         Language::Spanish => &WORDLIST_SPANISH,
+        Language::French => &WORDLIST_FRENCH,
+        Language::Russian => &WORDLIST_RUSSIAN,
     }
 }
 
@@ -123,6 +129,25 @@ mod tests {
         let mut rng = StepRng::new(1, 0);
         let m = Mnemonic::random(&mut rng, Language::ChineseSimplified);
         let expected = WORDLIST_CHINESE_SIMPLIFIED[1];
+        assert!(m.phrase().split_whitespace().all(|w| w == expected));
+    }
+
+    #[test]
+    fn french_roundtrip() {
+        let phrase = WORDLIST_FRENCH[..24].join(" ");
+        let m = Mnemonic::new(&phrase, Language::French).unwrap();
+        assert_eq!(m.phrase(), phrase);
+        let mut rng = StepRng::new(1, 0);
+        let r = Mnemonic::random(&mut rng, Language::French);
+        let expected = WORDLIST_FRENCH[1];
+        assert!(r.phrase().split_whitespace().all(|w| w == expected));
+    }
+
+    #[test]
+    fn russian_random() {
+        let mut rng = StepRng::new(1, 0);
+        let m = Mnemonic::random(&mut rng, Language::Russian);
+        let expected = WORDLIST_RUSSIAN[1];
         assert!(m.phrase().split_whitespace().all(|w| w == expected));
     }
 }
