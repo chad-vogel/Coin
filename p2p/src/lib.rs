@@ -418,6 +418,9 @@ impl Node {
         let save_chain = self.chain.clone();
         let save_running = self.running.clone();
         tokio::spawn(async move {
+            // Delay the first save to give `restore_mempool` time to
+            // remove any existing file during startup.
+            tokio::time::sleep(Duration::from_secs(5)).await;
             while save_running.load(Ordering::SeqCst) {
                 {
                     let chain = save_chain.lock().await;
