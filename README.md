@@ -79,11 +79,15 @@ Field descriptions:
 - `listeners` – network interfaces and ports to bind.
 - `wallet_address` – optional address used when mining rewards are paid.
 - `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
-- `block_dir` – directory where block files are stored.
+- `block_dir` – directory where the RocksDB database is stored.
 - `seed_peers` – peers contacted on startup for bootstrapping.
 - `mining_threads` – optional number of threads used for mining. When omitted,
   the miner automatically utilizes all available CPU cores. Faster hardware or
   more threads will generally lead to shorter block times.
+
+Blocks and UTXOs are persisted using a RocksDB database stored in
+`block_dir`. Any legacy `blk*.dat` files will be migrated automatically on
+startup.
 
 ## Tor Usage
 

@@ -636,12 +636,15 @@ impl Blockchain {
     }
 
     pub fn save<P: AsRef<Path>>(&self, dir: P) -> std::io::Result<()> {
+        use rocksdb::Options;
         use std::fs;
 
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
-        // remove existing block files to avoid duplication
-        if dir.exists() {
+        if blockfile::db_exists(dir) {
+            let _ = rocksdb::DB::destroy(&Options::default(), dir);
+        } else {
+            // cleanup any legacy files
             for entry in fs::read_dir(dir)? {
                 let entry = entry?;
                 if let Some(name) = entry.file_name().to_str() {
@@ -654,7 +657,7 @@ impl Blockchain {
         for block in &self.chain {
             blockfile::append_block(dir, block)?;
         }
-        utxofile::save_utxos(dir.join("utxos.bin"), &self.utxos)?;
+        utxofile::save_utxos(dir, &self.utxos)?;
         Ok(())
     }
 
@@ -667,14 +670,26 @@ impl Blockchain {
 
     pub fn load<P: AsRef<Path>>(dir: P) -> std::io::Result<Self> {
         let dir = dir.as_ref();
-        let blocks = blockfile::read_blocks(dir)?;
+        let blocks = if blockfile::db_exists(dir) {
+            blockfile::read_blocks(dir)?
+        } else {
+            blockfile::migrate_from_files(dir)?
+        };
         if !Self::validate_chain(&blocks) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "invalid chain",
             ));
         }
-        let saved_utxos = utxofile::load_utxos(dir.join("utxos.bin")).ok();
+        let saved_utxos = if blockfile::db_exists(dir) {
+            utxofile::load_utxos(dir).ok()
+        } else {
+            let map = utxofile::load_utxos(dir.join("utxos.bin")).ok();
+            if let Some(ref m) = map {
+                let _ = utxofile::save_utxos(dir, m);
+            }
+            map
+        };
         let mut bc = Blockchain::new();
         for block in &blocks {
             bc.add_block(block.clone());
@@ -1000,8 +1015,7 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        assert!(dir.path().join("blk00000.dat").exists());
-        assert!(dir.path().join("blk00001.dat").exists());
+        assert!(dir.path().join("CURRENT").exists());
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.all(), bc.all());
     }
@@ -1024,20 +1038,9 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        std::fs::write(dir.path().join("blk99999.dat"), b"junk").unwrap();
+        std::fs::write(dir.path().join("junk"), b"bad").unwrap();
         bc.save(dir.path()).unwrap();
-        let count = std::fs::read_dir(dir.path())
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_str()
-                    .unwrap()
-                    .starts_with("blk")
-            })
-            .count();
-        assert_eq!(count, 2);
+        assert!(!dir.path().join("junk").exists());
     }
 
     #[test]
