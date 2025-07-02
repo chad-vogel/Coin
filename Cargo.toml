@@ -6,6 +6,7 @@ members = [
     "wallet",
     "stake",
     "contract-runtime",
+    "contract-sdk",
     "http-api",
 ]
 
