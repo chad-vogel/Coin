@@ -3,18 +3,81 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use bincode;
+use rocksdb::{DB, IteratorMode, Options};
 
 use crate::Block;
 
-/// Magic bytes identifying the start of a block.
-pub const MAGIC_BYTES: [u8; 4] = [0xF9, 0xBE, 0xB4, 0xD9];
+const CURRENT_FILE: &str = "CURRENT";
 
+/// Magic bytes identifying the start of a block in legacy files.
+const MAGIC_BYTES: [u8; 4] = [0xF9, 0xBE, 0xB4, 0xD9];
+
+fn db_exists(dir: &Path) -> bool {
+    dir.join(CURRENT_FILE).exists()
+}
+
+fn open_db(path: &Path) -> std::io::Result<DB> {
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+}
+
+fn destroy_db(path: &Path) -> std::io::Result<()> {
+    if path.exists() {
+        DB::destroy(&Options::default(), path)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    }
+    Ok(())
+}
+
+fn serialize_error<E: std::fmt::Display>(e: E) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
+}
+
+/// Determine the next block index by examining existing keys.
+fn next_index(db: &DB) -> u32 {
+    db.iterator(IteratorMode::End)
+        .next()
+        .map(|(k, _)| u32::from_be_bytes(k.as_ref().try_into().unwrap()) + 1)
+        .unwrap_or(0)
+}
+
+/// Append `block` to the RocksDB database located at `dir`.
+pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
+    migrate_from_files(dir)?;
+    let db = open_db(dir)?;
+    let index = next_index(&db);
+    let data = bincode::serialize(block).map_err(serialize_error)?;
+    db.put(index.to_be_bytes(), data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    Ok(())
+}
+
+/// Read all blocks from RocksDB at `dir`. If legacy files are present they are
+/// migrated automatically.
+pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
+    migrate_from_files(dir)?;
+    let db = open_db(dir)?;
+    let mut blocks = Vec::new();
+    for (_, v) in db.iterator(IteratorMode::Start) {
+        let block: Block = bincode::deserialize(&v)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "decode error"))?;
+        blocks.push(block);
+    }
+    Ok(blocks)
+}
+
+/// Remove all stored blocks.
+pub fn reset(dir: &Path) -> std::io::Result<()> {
+    destroy_db(dir)
+}
+
+// ----- Legacy file support -----
 fn blockfile_path(dir: &Path, index: u32) -> PathBuf {
     dir.join(format!("blk{:05}.dat", index))
 }
 
-/// Determine the next block index by inspecting existing files.
-fn next_index(dir: &Path) -> std::io::Result<u32> {
+fn legacy_next_index(dir: &Path) -> std::io::Result<u32> {
     fs::create_dir_all(dir)?;
     let mut max: Option<u32> = None;
     for entry in fs::read_dir(dir)? {
@@ -34,22 +97,18 @@ fn next_index(dir: &Path) -> std::io::Result<u32> {
     Ok(max.map_or(0, |m| m + 1))
 }
 
-/// Store `block` in a new `blkXXXXX.dat` file inside `dir`.
-pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
-    let index = next_index(dir)?;
+fn append_block_file(dir: &Path, block: &Block) -> std::io::Result<()> {
+    let index = legacy_next_index(dir)?;
     let path = blockfile_path(dir, index);
     let mut file = File::create(&path)?;
-    let data = bincode::serialize(block).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
-    })?;
+    let data = bincode::serialize(block).map_err(serialize_error)?;
     file.write_all(&MAGIC_BYTES)?;
     file.write_all(&(data.len() as u32).to_le_bytes())?;
     file.write_all(&data)?;
     Ok(())
 }
 
-/// Read all blocks from blk.dat files in `dir` in order.
-pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
+fn read_blocks_files(dir: &Path) -> std::io::Result<Vec<Block>> {
     let mut blocks = Vec::new();
     let mut index = 0;
     loop {
@@ -87,6 +146,46 @@ pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
     Ok(blocks)
 }
 
+fn migrate_from_files(dir: &Path) -> std::io::Result<()> {
+    if db_exists(dir) {
+        return Ok(());
+    }
+    let mut has_files = false;
+    for entry in fs::read_dir(dir).unwrap_or_else(|_| fs::read_dir(".").unwrap()) {
+        if let Ok(entry) = entry {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with("blk") && name.ends_with(".dat") {
+                    has_files = true;
+                    break;
+                }
+            }
+        }
+    }
+    if !has_files {
+        // ensure DB directory exists
+        let _ = open_db(dir)?;
+        return Ok(());
+    }
+    let blocks = read_blocks_files(dir)?;
+    destroy_db(dir)?;
+    let db = open_db(dir)?;
+    for (i, block) in blocks.iter().enumerate() {
+        let data = bincode::serialize(block).map_err(serialize_error)?;
+        db.put((i as u32).to_be_bytes(), data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    }
+    // remove legacy files
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with("blk") && name.ends_with(".dat") {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -117,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn append_creates_separate_files() {
+    fn append_creates_multiple_entries() {
         let dir = tempdir().unwrap();
         let mut bc = Blockchain::new();
         let tx =
@@ -135,46 +234,18 @@ mod tests {
         let block = bc.all()[0].clone();
         append_block(dir.path(), &block).unwrap();
         append_block(dir.path(), &block).unwrap();
-        assert!(dir.path().join("blk00000.dat").exists());
-        assert!(dir.path().join("blk00001.dat").exists());
-    }
-
-    #[test]
-    fn read_blocks_invalid_magic() {
-        let dir = tempdir().unwrap();
-        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
-        file.write_all(b"badmagic").unwrap();
-        let res = read_blocks(dir.path());
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn read_blocks_too_small() {
-        let dir = tempdir().unwrap();
-        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
-        file.write_all(&MAGIC_BYTES[..2]).unwrap();
-        let res = read_blocks(dir.path());
-        assert!(res.is_err());
-    }
-
-    #[test]
-    fn read_blocks_length_mismatch() {
-        let dir = tempdir().unwrap();
-        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
-        file.write_all(&MAGIC_BYTES).unwrap();
-        file.write_all(&10u32.to_le_bytes()).unwrap();
-        file.write_all(&[0u8; 5]).unwrap();
-        let res = read_blocks(dir.path());
-        assert!(res.is_err());
+        let db = open_db(dir.path()).unwrap();
+        let count = db.iterator(IteratorMode::Start).count();
+        assert_eq!(count, 2);
     }
 
     #[test]
     fn read_blocks_decode_error() {
         let dir = tempdir().unwrap();
-        let mut file = File::create(dir.path().join("blk00000.dat")).unwrap();
-        file.write_all(&MAGIC_BYTES).unwrap();
-        file.write_all(&2u32.to_le_bytes()).unwrap();
-        file.write_all(&[0u8; 2]).unwrap();
+        let db = open_db(dir.path()).unwrap();
+        db.put(0u32.to_be_bytes(), [0u8, 1u8])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .unwrap();
         let res = read_blocks(dir.path());
         assert!(res.is_err());
     }

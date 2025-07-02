@@ -640,21 +640,11 @@ impl Blockchain {
 
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
-        // remove existing block files to avoid duplication
-        if dir.exists() {
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.starts_with("blk") && name.ends_with(".dat") {
-                        let _ = fs::remove_file(entry.path());
-                    }
-                }
-            }
-        }
+        blockfile::reset(dir)?;
         for block in &self.chain {
             blockfile::append_block(dir, block)?;
         }
-        utxofile::save_utxos(dir.join("utxos.bin"), &self.utxos)?;
+        utxofile::save_utxos(dir, &self.utxos)?;
         Ok(())
     }
 
@@ -674,7 +664,7 @@ impl Blockchain {
                 "invalid chain",
             ));
         }
-        let saved_utxos = utxofile::load_utxos(dir.join("utxos.bin")).ok();
+        let saved_utxos = utxofile::load_utxos(dir).ok();
         let mut bc = Blockchain::new();
         for block in &blocks {
             bc.add_block(block.clone());
@@ -766,6 +756,7 @@ impl Blockchain {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use rocksdb;
     use std::collections::HashMap;
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
@@ -983,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_block_files() {
+    fn save_persists_blocks() {
         let mut bc = Blockchain::new();
         for i in 0..2 {
             let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
@@ -1000,14 +991,14 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        assert!(dir.path().join("blk00000.dat").exists());
-        assert!(dir.path().join("blk00001.dat").exists());
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        assert_eq!(db.iterator(rocksdb::IteratorMode::Start).count(), 2);
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.all(), bc.all());
     }
 
     #[test]
-    fn save_removes_existing_block_files() {
+    fn save_overwrites_database() {
         let mut bc = Blockchain::new();
         for _ in 0..2 {
             let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
@@ -1024,19 +1015,11 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        std::fs::write(dir.path().join("blk99999.dat"), b"junk").unwrap();
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.put(999u32.to_be_bytes(), b"junk").unwrap();
         bc.save(dir.path()).unwrap();
-        let count = std::fs::read_dir(dir.path())
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_str()
-                    .unwrap()
-                    .starts_with("blk")
-            })
-            .count();
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        let count = db.iterator(rocksdb::IteratorMode::Start).count();
         assert_eq!(count, 2);
     }
 
@@ -1390,7 +1373,8 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        std::fs::remove_file(dir.path().join("utxos.bin")).unwrap();
+        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        db.delete(b"utxos").unwrap();
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(&addr1), bc.balance(&addr1));
         assert_eq!(loaded.balance(&addr2), bc.balance(&addr2));
@@ -1412,9 +1396,7 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        let path = dir.path().join("utxos.bin");
-        assert!(path.exists());
-        let stored = utxofile::load_utxos(&path).unwrap();
+        let stored = utxofile::load_utxos(dir.path()).unwrap();
         assert_eq!(stored, bc.utxos);
     }
 
@@ -1436,7 +1418,7 @@ mod tests {
         bc.save(dir.path()).unwrap();
         let mut map = HashMap::new();
         map.insert(A1.to_string(), 123);
-        utxofile::save_utxos(dir.path().join("utxos.bin"), &map).unwrap();
+        utxofile::save_utxos(dir.path(), &map).unwrap();
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(A1), 123);
     }

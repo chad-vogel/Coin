@@ -1,28 +1,43 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{Read, Write};
 use std::path::Path;
 
 use bincode;
+use rocksdb::{DB, Options};
+
+const UTXO_KEY: &[u8] = b"utxos";
+
+fn open_db(path: &Path) -> std::io::Result<DB> {
+    let mut opts = Options::default();
+    opts.create_if_missing(true);
+    DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+}
+
+fn serialize_error<E: std::fmt::Display>(e: E) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
+}
 
 pub fn save_utxos<P: AsRef<Path>>(path: P, utxos: &HashMap<String, u64>) -> std::io::Result<()> {
-    let data = bincode::serialize(utxos).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
-    })?;
-    let mut f = File::create(path)?;
-    f.write_all(&data)
+    let db = open_db(path.as_ref())?;
+    let data = bincode::serialize(utxos).map_err(serialize_error)?;
+    db.put(UTXO_KEY, data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    Ok(())
 }
 
 pub fn load_utxos<P: AsRef<Path>>(path: P) -> std::io::Result<HashMap<String, u64>> {
-    let mut f = File::open(path)?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf)?;
-    bincode::deserialize(&buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let db = open_db(path.as_ref())?;
+    match db.get(UTXO_KEY) {
+        Ok(Some(val)) => bincode::deserialize(&val)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        Ok(None) => Ok(HashMap::new()),
+        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocksdb::IteratorMode;
     use tempfile::tempdir;
 
     #[test]
@@ -31,18 +46,19 @@ mod tests {
         map.insert("a".to_string(), 1);
         map.insert("b".to_string(), 2);
         let dir = tempdir().unwrap();
-        let path = dir.path().join("utxos.bin");
-        save_utxos(&path, &map).unwrap();
-        let loaded = load_utxos(&path).unwrap();
+        save_utxos(dir.path(), &map).unwrap();
+        let loaded = load_utxos(dir.path()).unwrap();
         assert_eq!(loaded, map);
+        let db = open_db(dir.path()).unwrap();
+        assert_eq!(db.iterator(IteratorMode::Start).count(), 1);
     }
 
     #[test]
     fn invalid_data() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("utxos.bin");
-        std::fs::write(&path, b"bad").unwrap();
-        let res = load_utxos(&path);
+        let db = open_db(dir.path()).unwrap();
+        db.put(UTXO_KEY, [0u8, 1u8]).unwrap();
+        let res = load_utxos(dir.path());
         assert!(res.is_err());
     }
 }

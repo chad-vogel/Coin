@@ -1,6 +1,6 @@
 # Coin
 
-This project aims to become a full-fledged coin system built with multiple crates. Network interactions are handled via a JSON-RPC interface exposed by the `coin-p2p` crate. The main `coin` crate provides core blockchain functionality. Unit tests cover all functionality and code coverage is measured using `cargo tarpaulin`.
+This project aims to become a full-fledged coin system built with multiple crates. Network interactions are handled via a JSON-RPC interface exposed by the `coin-p2p` crate. The main `coin` crate provides core blockchain functionality and persists blocks and UTXO data in a RocksDB database. Unit tests cover all functionality and code coverage is measured using `cargo tarpaulin`.
 
 Each coin is divisible into 100&nbsp;000&nbsp;000 units allowing for very small transfers.
 
@@ -79,7 +79,7 @@ Field descriptions:
 - `listeners` – network interfaces and ports to bind.
 - `wallet_address` – optional address used when mining rewards are paid.
 - `node_type` – one of `Miner`, `Wallet`, or `Verifier`.
-- `block_dir` – directory where block files are stored.
+- `block_dir` – directory where the RocksDB database is stored.
 - `seed_peers` – peers contacted on startup for bootstrapping.
 - `mining_threads` – optional number of threads used for mining. When omitted,
   the miner automatically utilizes all available CPU cores. Faster hardware or

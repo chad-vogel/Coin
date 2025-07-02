@@ -1,4 +1,4 @@
-extern "C" {
+unsafe extern "C" {
     fn get(key: i32) -> i64;
     fn set(key: i32, value: i64);
 }
@@ -68,8 +68,7 @@ unsafe fn write_u256(base: i32, val: U256) {
     write_u128(base + 2, val.hi);
 }
 
-#[no_mangle]
-pub extern "C" fn main() -> i64 {
+pub unsafe extern "C" fn contract_main() -> i64 {
     unsafe {
         let mut total = read_u256(TOTAL_SUPPLY_BASE);
         if total.is_zero() {
@@ -93,3 +92,5 @@ pub extern "C" fn main() -> i64 {
         read_u128(BOB_BASE) as i64
     }
 }
+
+fn main() {}
