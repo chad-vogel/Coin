@@ -821,7 +821,15 @@ impl Node {
         let mut stream = self.connect_stream(addr).await?;
         let hs = RpcMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
-        let resp = read_msg(&mut stream).await?;
+        let resp = match tokio::time::timeout(Duration::from_secs(1), read_msg(&mut stream)).await {
+            Ok(r) => r?,
+            Err(_) => {
+                return Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::TimedOut,
+                    "handshake timeout",
+                ));
+            }
+        };
         match resp {
             RpcMessage::Handshake(h)
                 if h.network_id == self.network_id
@@ -853,7 +861,15 @@ impl Node {
         let mut stream = self.connect_stream(addr).await?;
         let hs = RpcMessage::Handshake(self.build_handshake());
         write_msg(&mut stream, &hs).await?;
-        let resp = read_msg(&mut stream).await?;
+        let resp = match tokio::time::timeout(Duration::from_secs(1), read_msg(&mut stream)).await {
+            Ok(r) => r?,
+            Err(_) => {
+                return Err(tokio::io::Error::new(
+                    tokio::io::ErrorKind::TimedOut,
+                    "handshake timeout",
+                ));
+            }
+        };
         match resp {
             RpcMessage::Handshake(h)
                 if h.network_id == self.network_id
