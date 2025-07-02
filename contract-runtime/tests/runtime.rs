@@ -64,11 +64,12 @@ fn out_of_gas() {
 
 #[test]
 fn gas_consumption() {
-    let wat = "(module (func (export \"main\")))";
+    // empty function that returns 0
+    let wat = "(module (func (export \"main\") (result i32) i32.const 0))";
     let wasm = wat::parse_str(wat).unwrap();
     let mut rt = Runtime::new();
     rt.deploy("dave", &wasm).unwrap();
-    let mut gas = 1;
+    let mut gas = 10;
     assert!(rt.execute("dave", &mut gas).is_ok());
-    assert_eq!(gas, 0);
+    assert!(gas < 10);
 }

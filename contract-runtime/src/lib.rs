@@ -2,7 +2,6 @@ use coin_proto::Transaction;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
-use wasmi::core::TrapCode;
 use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 
 pub struct Runtime {
