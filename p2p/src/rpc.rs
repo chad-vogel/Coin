@@ -1,6 +1,7 @@
 use coin_proto::{
-    Balance, Block, Chain, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers, GetTransaction,
-    Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail, Unstake, Vote,
+    Balance, Block, Chain, Finalized, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers,
+    GetTransaction, Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail,
+    Unstake, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json::{Value, json};
@@ -26,6 +27,7 @@ pub enum RpcMessage {
     Stake(Stake),
     Unstake(Unstake),
     Vote(Vote),
+    Finalized(Finalized),
     Schedule(Schedule),
     Handshake(Handshake),
 }
@@ -53,6 +55,7 @@ pub fn encode_message(msg: &RpcMessage) -> JsonRpc {
         RpcMessage::Stake(s) => JsonRpc::notification_with_params("stake", json!(s)),
         RpcMessage::Unstake(u) => JsonRpc::notification_with_params("unstake", json!(u)),
         RpcMessage::Vote(v) => JsonRpc::notification_with_params("vote", json!(v)),
+        RpcMessage::Finalized(f) => JsonRpc::notification_with_params("finalized", json!(f)),
         RpcMessage::Schedule(s) => JsonRpc::notification_with_params("schedule", json!(s)),
         RpcMessage::Handshake(h) => JsonRpc::notification_with_params("handshake", json!(h)),
     }
@@ -116,6 +119,10 @@ pub fn decode_message(rpc: JsonRpc) -> Option<RpcMessage> {
             .get_params()
             .and_then(|p| serde_json::from_value::<Vote>(params_to_value(p)).ok())
             .map(RpcMessage::Vote),
+        "finalized" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<Finalized>(params_to_value(p)).ok())
+            .map(RpcMessage::Finalized),
         "schedule" => rpc
             .get_params()
             .and_then(|p| serde_json::from_value::<Schedule>(params_to_value(p)).ok())

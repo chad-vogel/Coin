@@ -536,7 +536,7 @@ impl Node {
                             proxy,
                         )
                         .await;
-                        consensus.lock().await.start_round(hash);
+                        consensus.lock().await.start_round(hash, &mut chain);
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -759,7 +759,10 @@ impl Node {
                                                     if valid_block(&chain, &block) {
                                                         let hash = block.hash();
                                                         chain.add_block(block);
-                                                        consensus.lock().await.start_round(hash);
+                                                        consensus
+                                                            .lock()
+                                                            .await
+                                                            .start_round(hash, &mut chain);
                                                     }
                                                 }
                                             }
@@ -780,9 +783,18 @@ impl Node {
                                                         if reached {
                                                             let mut chain = chain.lock().await;
                                                             let _ = chain.save(&block_dir());
+                                                            let _ = consensus
+                                                                .lock()
+                                                                .await
+                                                                .save_finalized(
+                                                                    block_dir() + "/finalized.bin",
+                                                                );
                                                         }
                                                     }
                                                 }
+                                            }
+                                            RpcMessage::Finalized(f) => {
+                                                consensus.lock().await.mark_finalized(&f.hash);
                                             }
                                             RpcMessage::Schedule(_) => {}
                                             RpcMessage::Stake(_) => {}
@@ -950,10 +962,31 @@ impl Node {
         if finalized {
             let mut chain = self.chain.lock().await;
             let _ = chain.save(&block_dir());
+            let _ = self
+                .consensus
+                .lock()
+                .await
+                .save_finalized(block_dir() + "/finalized.bin");
             let slot = chain.len() as u64;
             drop(chain);
+            let _ = self.broadcast_finalized(vote.block_hash.clone()).await;
             let _ = self.broadcast_schedule(slot).await;
         }
+    }
+
+    async fn broadcast_finalized(&self, hash: String) -> tokio::io::Result<()> {
+        let msg = RpcMessage::Finalized(coin_proto::Finalized { hash });
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
+        for addr in list {
+            if let Ok(mut stream) = self.connect_stream(addr).await {
+                let hs = RpcMessage::Handshake(self.build_handshake());
+                if write_msg(&mut stream, &hs).await.is_ok() {
+                    let _ = read_msg(&mut stream).await;
+                    let _ = write_msg(&mut stream, &msg).await;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn broadcast_schedule(&self, slot: u64) -> tokio::io::Result<()> {

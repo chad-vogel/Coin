@@ -1,4 +1,4 @@
-extern "C" {
+unsafe extern "C" {
     fn get(key: i32) -> i64;
     fn set(key: i32, value: i64);
 }
@@ -68,8 +68,7 @@ unsafe fn write_u256(base: i32, val: U256) {
     write_u128(base + 2, val.hi);
 }
 
-#[no_mangle]
-pub extern "C" fn main() -> i64 {
+pub extern "C" fn entry() {
     unsafe {
         let mut total = read_u256(TOTAL_SUPPLY_BASE);
         if total.is_zero() {
@@ -79,7 +78,7 @@ pub extern "C" fn main() -> i64 {
             };
             write_u256(ALICE_BASE, initial);
             write_u256(TOTAL_SUPPLY_BASE, initial);
-            return 0;
+            return;
         }
 
         let mut alice = read_u256(ALICE_BASE);
@@ -90,6 +89,10 @@ pub extern "C" fn main() -> i64 {
             write_u256(ALICE_BASE, alice);
             write_u256(BOB_BASE, bob);
         }
-        read_u128(BOB_BASE) as i64
+        let _ = read_u128(BOB_BASE);
     }
+}
+
+fn main() {
+    entry();
 }

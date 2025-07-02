@@ -1,6 +1,7 @@
 use coin_p2p::rpc::{RpcMessage, decode_message, encode_message, read_rpc, write_rpc};
 use coin_proto::{
-    Balance, GetBalance, GetBlocks, GetTransaction, Schedule, Transaction, TransactionDetail, Vote,
+    Balance, Finalized, GetBalance, GetBlocks, GetTransaction, Schedule, Transaction,
+    TransactionDetail, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json;
@@ -31,6 +32,15 @@ fn vote_and_schedule_roundtrip() {
     let dec2 = decode_message(json2).unwrap();
     match dec2 {
         RpcMessage::Schedule(s2) => assert_eq!(s2, sched),
+        _ => panic!("wrong message"),
+    }
+
+    let fin = Finalized { hash: "h".into() };
+    let msg3 = RpcMessage::Finalized(fin.clone());
+    let json3 = encode_message(&msg3);
+    let dec3 = decode_message(json3).unwrap();
+    match dec3 {
+        RpcMessage::Finalized(f2) => assert_eq!(f2, fin),
         _ => panic!("wrong message"),
     }
 
