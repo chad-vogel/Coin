@@ -107,6 +107,37 @@ pub async fn handle_req(
                     .unwrap()),
             }
         }
+        (&Method::GET, "/mempool") => {
+            let msg = RpcMessage::GetChain;
+            match forward_rpc(node, &msg).await {
+                Ok(Some(resp)) => {
+                    let rpc = rpc::encode_message(&resp);
+                    let body = serde_json::to_vec(&rpc).unwrap();
+                    Ok(Response::new(Body::from(body)))
+                }
+                Ok(None) => Ok(Response::new(Body::empty())),
+                Err(_) => Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("rpc error"))
+                    .unwrap()),
+            }
+        }
+        (&Method::GET, "/status") => {
+            let peers = match forward_rpc(node, &RpcMessage::GetPeers).await {
+                Ok(Some(RpcMessage::Peers(p))) => p.addrs.len(),
+                _ => 0,
+            };
+            let height = match forward_rpc(node, &RpcMessage::GetChain).await {
+                Ok(Some(RpcMessage::Chain(c))) => c.blocks.len(),
+                _ => 0,
+            };
+            let body = serde_json::to_vec(&serde_json::json!({
+                "peers": peers,
+                "height": height
+            }))
+            .unwrap();
+            Ok(Response::new(Body::from(body)))
+        }
         _ => Ok(not_found("not found")),
     }
 }
