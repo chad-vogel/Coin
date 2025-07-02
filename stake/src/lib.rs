@@ -227,8 +227,8 @@ mod tests {
                 difficulty: 0,
             },
             transactions: vec![
-                coin::coinbase_transaction(&addr1, bc.block_subsidy()),
-                coin::coinbase_transaction(&addr2, bc.block_subsidy()),
+                coin::coinbase_transaction(&addr1, bc.block_subsidy()).unwrap(),
+                coin::coinbase_transaction(&addr2, bc.block_subsidy()).unwrap(),
             ],
         });
         let mut reg = StakeRegistry::new();
@@ -260,7 +260,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy())],
+            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
         let mut reg = StakeRegistry::new();
         assert!(reg.stake(&mut bc, &addr, 10));
@@ -323,8 +323,8 @@ mod tests {
                 difficulty: 0,
             },
             transactions: vec![
-                coin::coinbase_transaction(&addr1, bc.block_subsidy()),
-                coin::coinbase_transaction(&addr2, bc.block_subsidy()),
+                coin::coinbase_transaction(&addr1, bc.block_subsidy()).unwrap(),
+                coin::coinbase_transaction(&addr2, bc.block_subsidy()).unwrap(),
             ],
         });
         let mut reg = StakeRegistry::new();

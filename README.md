@@ -125,7 +125,7 @@ use k256::ecdsa::{signature::Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
 let wallet = Wallet::generate("").unwrap();
-let tx = new_transaction_with_fee("alice", "bob", 5, 0);
+let tx = new_transaction_with_fee("alice", "bob", 5, 0).unwrap();
 let hash = Sha256::digest(tx.hash().as_bytes());
 let child = wallet.derive_priv("m/0'/0/0").unwrap();
 let signer: SigningKey = (&child).into();

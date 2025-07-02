@@ -60,17 +60,25 @@ pub const HALVING_INTERVAL: u64 = 200_000;
 /// Maximum number of units that will ever exist
 pub const MAX_SUPPLY: u64 = 20_000_000 * COIN;
 
+#[derive(Debug, PartialEq)]
+pub enum Error {
+    InvalidAddress,
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
 pub fn new_transaction_with_fee(
     sender: impl Into<String>,
     recipient: impl Into<String>,
     amount: u64,
     fee: u64,
-) -> Transaction {
+) -> Result<Transaction> {
     let sender = sender.into();
     let recipient = recipient.into();
-    assert!(valid_address(&sender));
-    assert!(valid_address(&recipient));
-    Transaction {
+    if !valid_address(&sender) || !valid_address(&recipient) {
+        return Err(Error::InvalidAddress);
+    }
+    Ok(Transaction {
         sender,
         recipient,
         amount,
@@ -79,14 +87,14 @@ pub fn new_transaction_with_fee(
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: Vec::new(),
-    }
+    })
 }
 
 pub fn new_transaction(
     sender: impl Into<String>,
     recipient: impl Into<String>,
     amount: u64,
-) -> Transaction {
+) -> Result<Transaction> {
     new_transaction_with_fee(sender, recipient, amount, 0)
 }
 
@@ -94,9 +102,11 @@ pub fn new_multi_transaction_with_fee(
     sender: impl Into<String>,
     outputs: Vec<(String, u64)>,
     fee: u64,
-) -> Transaction {
+) -> Result<Transaction> {
     let sender = sender.into();
-    assert!(valid_address(&sender));
+    if !valid_address(&sender) {
+        return Err(Error::InvalidAddress);
+    }
     let recipient = outputs.first().map(|o| o.0.clone()).unwrap_or_default();
     let amount = outputs.first().map(|o| o.1).unwrap_or(0);
     let extra: Vec<_> = outputs
@@ -107,11 +117,10 @@ pub fn new_multi_transaction_with_fee(
             amount: amt,
         })
         .collect();
-    assert!(valid_address(&recipient));
-    for out in &extra {
-        assert!(valid_address(&out.address));
+    if !valid_address(&recipient) || extra.iter().any(|o| !valid_address(&o.address)) {
+        return Err(Error::InvalidAddress);
     }
-    Transaction {
+    Ok(Transaction {
         sender,
         recipient,
         amount,
@@ -120,14 +129,16 @@ pub fn new_multi_transaction_with_fee(
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: extra,
-    }
+    })
 }
 
 /// Create a coinbase transaction paying `amount` to `miner`
-pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transaction {
+pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Result<Transaction> {
     let miner = miner.into();
-    assert!(valid_address(&miner));
-    Transaction {
+    if !valid_address(&miner) {
+        return Err(Error::InvalidAddress);
+    }
+    Ok(Transaction {
         sender: String::new(),
         recipient: miner,
         amount,
@@ -136,7 +147,7 @@ pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transactio
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: Vec::new(),
-    }
+    })
 }
 
 pub fn encrypt_message(msg: &str, sk: &secp256k1::SecretKey, pk: &secp256k1::PublicKey) -> Vec<u8> {
@@ -172,12 +183,13 @@ pub fn new_transaction_with_message(
     message: &str,
     sender_sk: &secp256k1::SecretKey,
     recipient_pk: &secp256k1::PublicKey,
-) -> Transaction {
+) -> Result<Transaction> {
     let sender = sender.into();
     let recipient = recipient.into();
-    assert!(valid_address(&sender));
-    assert!(valid_address(&recipient));
-    Transaction {
+    if !valid_address(&sender) || !valid_address(&recipient) {
+        return Err(Error::InvalidAddress);
+    }
+    Ok(Transaction {
         sender,
         recipient,
         amount,
@@ -186,7 +198,7 @@ pub fn new_transaction_with_message(
         encrypted_message: encrypt_message(message, sender_sk, recipient_pk),
         inputs: Vec::new(),
         outputs: Vec::new(),
-    }
+    })
 }
 
 /// Validate that an address is Base58Check encoded and 34 characters long.
@@ -434,7 +446,7 @@ impl Blockchain {
                 merkle_root,
                 timestamp: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| std::time::Duration::new(0, 0))
                     .as_millis() as u64,
                 nonce: 0,
                 difficulty: self.difficulty,
@@ -647,7 +659,8 @@ impl Blockchain {
     }
 
     pub fn save_mempool<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        let data = serde_json::to_vec(&self.mempool).unwrap();
+        let data = serde_json::to_vec(&self.mempool)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let mut f = File::create(path)?;
         f.write_all(&data)
     }
@@ -760,7 +773,7 @@ mod tests {
 
     #[test]
     fn transaction_hash_consistent() {
-        let tx = new_transaction(A1, A2, 10);
+        let tx = new_transaction(A1, A2, 10).unwrap();
         let hash1 = tx.hash();
         let hash2 = tx.hash();
         assert_eq!(hash1, hash2);
@@ -784,13 +797,13 @@ mod tests {
                 difficulty: 0,
             },
             transactions: vec![
-                coinbase_transaction(&addr1, bc.block_subsidy()),
-                coinbase_transaction(&addr2, bc.block_subsidy()),
+                coinbase_transaction(&addr1, bc.block_subsidy()).unwrap(),
+                coinbase_transaction(&addr2, bc.block_subsidy()).unwrap(),
             ],
         });
-        let mut tx1 = new_transaction(&addr1, &addr2, 5);
+        let mut tx1 = new_transaction(&addr1, &addr2, 5).unwrap();
         tx1.sign(&sk1);
-        let mut tx2 = new_transaction(&addr2, &addr1, 7);
+        let mut tx2 = new_transaction(&addr2, &addr1, 7).unwrap();
         tx2.sign(&sk2);
         assert!(bc.add_transaction(tx1.clone()));
         assert!(bc.add_transaction(tx2.clone()));
@@ -849,7 +862,7 @@ mod tests {
     fn balance_reflects_coinbase() {
         let mut bc = Blockchain::new();
         assert_eq!(bc.balance(A1), 0);
-        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -882,9 +895,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
     fn new_transaction_invalid_sender_panics() {
-        let _ = new_transaction("badaddr", A2, 1);
+        assert!(new_transaction("badaddr", A2, 1).is_err());
     }
 
     #[test]
@@ -892,7 +904,7 @@ mod tests {
         let mut bc = Blockchain::new();
         let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let addr = address_from_secret(&sk);
-        let mut tx = new_transaction(&addr, A2, 0);
+        let mut tx = new_transaction(&addr, A2, 0).unwrap();
         tx.sign(&sk);
         assert!(!bc.add_transaction(tx));
     }
@@ -911,9 +923,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
-        let mut tx = new_transaction(&addr, A2, bc.block_subsidy() + 1);
+        let mut tx = new_transaction(&addr, A2, bc.block_subsidy() + 1).unwrap();
         tx.sign(&sk);
         assert!(!bc.add_transaction(tx));
     }
@@ -931,14 +943,15 @@ mod tests {
                 merkle_root: compute_merkle_root(&[coinbase_transaction(
                     &addr1,
                     bc.block_subsidy(),
-                )]),
+                )
+                .unwrap()]),
                 timestamp: 0,
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(&addr1, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr1, bc.block_subsidy()).unwrap()],
         });
-        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 2);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 2).unwrap();
         tx.sign(&sk1);
         assert!(bc.add_transaction(tx.clone()));
         let block = bc.candidate_block();
@@ -950,7 +963,7 @@ mod tests {
     #[test]
     fn save_and_load_chain() {
         let mut bc = Blockchain::new();
-        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -973,7 +986,7 @@ mod tests {
     fn save_creates_block_files() {
         let mut bc = Blockchain::new();
         for i in 0..2 {
-            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
             bc.add_block(Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
@@ -997,7 +1010,7 @@ mod tests {
     fn save_removes_existing_block_files() {
         let mut bc = Blockchain::new();
         for _ in 0..2 {
-            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
             bc.add_block(Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
@@ -1077,21 +1090,21 @@ mod tests {
     fn sign_and_verify_transaction() {
         let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let sender = address_from_secret(&sk);
-        let mut tx = new_transaction(&sender, A2, 5);
+        let mut tx = new_transaction(&sender, A2, 5).unwrap();
         tx.sign(&sk);
         assert!(tx.verify());
     }
 
     #[test]
     fn verify_rejects_bad_signature_len() {
-        let mut tx = new_transaction(A1, A2, 5);
+        let mut tx = new_transaction(A1, A2, 5).unwrap();
         tx.signature = vec![0u8; 10];
         assert!(!tx.verify());
     }
 
     #[test]
     fn verify_rejects_invalid_recovery_id() {
-        let mut tx = new_transaction(A1, A2, 5);
+        let mut tx = new_transaction(A1, A2, 5).unwrap();
         tx.signature = vec![4u8; 65];
         assert!(!tx.verify());
     }
@@ -1100,7 +1113,7 @@ mod tests {
     fn verify_rejects_malformed_signature() {
         let mut sig = vec![0u8; 65];
         sig[0] = 0; // valid recovery id
-        let mut tx = new_transaction(A1, A2, 5);
+        let mut tx = new_transaction(A1, A2, 5).unwrap();
         tx.signature = sig;
         assert!(!tx.verify());
     }
@@ -1118,9 +1131,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
-        let tx = new_transaction(&addr, A2, 1);
+        let tx = new_transaction(&addr, A2, 1).unwrap();
         assert!(!bc.add_transaction(tx));
     }
 
@@ -1137,9 +1150,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
-        let mut tx = new_transaction(&addr, A2, 1);
+        let mut tx = new_transaction(&addr, A2, 1).unwrap();
         tx.signature = vec![0u8; 10];
         assert!(!bc.add_transaction(tx));
     }
@@ -1165,12 +1178,12 @@ mod tests {
             &secp,
             &secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap(),
         );
-        let tx = new_transaction_with_message(A1, A2, 5, 0, "secret", &sk_sender, &pk_recipient);
+        let tx = new_transaction_with_message(A1, A2, 5, 0, "secret", &sk_sender, &pk_recipient)
+            .unwrap();
         assert!(!tx.encrypted_message.is_empty());
     }
 
     #[test]
-    #[should_panic]
     fn new_transaction_with_message_invalid_recipient() {
         let secp = secp256k1::Secp256k1::new();
         let sk_sender = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
@@ -1178,15 +1191,16 @@ mod tests {
             &secp,
             &secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap(),
         );
-        let _ =
+        let res =
             new_transaction_with_message(A1, "badaddr", 5, 0, "secret", &sk_sender, &pk_recipient);
+        assert!(res.is_err());
     }
 
     #[test]
     fn mempool_save_load_roundtrip() {
         let mut bc = Blockchain::new();
-        bc.add_transaction(coinbase_transaction(A1, 5));
-        bc.add_transaction(coinbase_transaction(A2, 7));
+        bc.add_transaction(coinbase_transaction(A1, 5).unwrap());
+        bc.add_transaction(coinbase_transaction(A2, 7).unwrap());
         let tmp = tempfile::NamedTempFile::new().unwrap();
         bc.save_mempool(tmp.path()).unwrap();
 
@@ -1197,8 +1211,8 @@ mod tests {
 
     #[test]
     fn merkle_root_tree() {
-        let tx1 = coinbase_transaction(A1, 1);
-        let tx2 = coinbase_transaction(A2, 1);
+        let tx1 = coinbase_transaction(A1, 1).unwrap();
+        let tx2 = coinbase_transaction(A2, 1).unwrap();
         let manual = {
             let mut hasher = Sha256::new();
             hasher.update(hex::decode(tx1.hash()).unwrap());
@@ -1217,7 +1231,7 @@ mod tests {
 
     #[test]
     fn compute_merkle_single_tx() {
-        let tx = coinbase_transaction(A1, 1);
+        let tx = coinbase_transaction(A1, 1).unwrap();
         let root = compute_merkle_root(&[tx.clone()]);
         assert_eq!(root, tx.hash());
     }
@@ -1225,7 +1239,7 @@ mod tests {
     #[test]
     fn prune_preserves_hash() {
         let bc = Blockchain::new();
-        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
         let merkle = compute_merkle_root(&[tx.clone()]);
         let block = Block {
             header: BlockHeader {
@@ -1321,7 +1335,7 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
-        let coinbase = coinbase_transaction(&addr1, bc.block_subsidy());
+        let coinbase = coinbase_transaction(&addr1, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1333,7 +1347,7 @@ mod tests {
             transactions: vec![coinbase.clone()],
         });
         assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64);
-        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1).unwrap();
         tx.sign(&sk1);
         assert!(bc.add_transaction(tx));
         assert_eq!(bc.available_utxo(&addr1), bc.block_subsidy() as i64 - 6);
@@ -1350,7 +1364,7 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
-        let cb = coinbase_transaction(&addr1, bc.block_subsidy());
+        let cb = coinbase_transaction(&addr1, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1361,9 +1375,9 @@ mod tests {
             },
             transactions: vec![cb.clone()],
         });
-        let mut tx = new_transaction(&addr1, &addr2, 10);
+        let mut tx = new_transaction(&addr1, &addr2, 10).unwrap();
         tx.sign(&sk1);
-        let cb2 = coinbase_transaction(&addr2, bc.block_subsidy());
+        let cb2 = coinbase_transaction(&addr2, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: bc.last_block_hash().unwrap(),
@@ -1385,7 +1399,7 @@ mod tests {
     #[test]
     fn save_writes_utxo_file() {
         let mut bc = Blockchain::new();
-        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1407,7 +1421,7 @@ mod tests {
     #[test]
     fn load_uses_saved_utxos() {
         let mut bc = Blockchain::new();
-        let tx = coinbase_transaction(A1, bc.block_subsidy());
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1435,7 +1449,8 @@ mod tests {
             &sender,
             vec![(A1.to_string(), 2), (A2.to_string(), 3)],
             1,
-        );
+        )
+        .unwrap();
         assert_eq!(tx.recipient, A1);
         assert_eq!(tx.amount, 2);
         assert_eq!(tx.outputs.len(), 1);
@@ -1448,7 +1463,7 @@ mod tests {
     fn prune_removes_old_transactions() {
         let mut bc = Blockchain::new();
         for i in 0..3 {
-            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
             bc.add_block(Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
@@ -1470,7 +1485,7 @@ mod tests {
     fn prune_reduces_disk_usage() {
         let mut bc = Blockchain::new();
         for i in 0..3 {
-            let tx = coinbase_transaction(A1, bc.block_subsidy());
+            let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
             bc.add_block(Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
@@ -1506,10 +1521,10 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
-        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1).unwrap();
         tx.sign(&sk1);
         let reward = Blockchain::subsidy_for_height(0, 0);
-        let cb = coinbase_transaction(&addr1, reward + tx.fee);
+        let cb = coinbase_transaction(&addr1, reward + tx.fee).unwrap();
         let merkle = compute_merkle_root(&[cb.clone(), tx.clone()]);
         let block = Block {
             header: BlockHeader {
@@ -1530,10 +1545,10 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
-        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1);
+        let mut tx = new_transaction_with_fee(&addr1, &addr2, 5, 1).unwrap();
         tx.sign(&sk1);
         let reward = Blockchain::subsidy_for_height(0, 0);
-        let cb = coinbase_transaction(&addr1, reward + tx.fee + 1);
+        let cb = coinbase_transaction(&addr1, reward + tx.fee + 1).unwrap();
         let merkle = compute_merkle_root(&[cb.clone(), tx.clone()]);
         let block = Block {
             header: BlockHeader {
@@ -1555,7 +1570,7 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
-        let cb = coinbase_transaction(&addr1, bc.block_subsidy());
+        let cb = coinbase_transaction(&addr1, bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -1566,7 +1581,7 @@ mod tests {
             },
             transactions: vec![cb.clone()],
         });
-        let mut tx = new_transaction(&addr1, &addr2, 10);
+        let mut tx = new_transaction(&addr1, &addr2, 10).unwrap();
         tx.inputs.push(TransactionInput {
             address: addr1.clone(),
             amount: 10,
@@ -1598,7 +1613,7 @@ mod tests {
                 timestamp += 1;
                 let reward = Blockchain::subsidy_for_height(i as u64, mined);
                 mined += reward;
-                let tx = coinbase_transaction(&addr, reward);
+                let tx = coinbase_transaction(&addr, reward).unwrap();
                 let merkle = compute_merkle_root(&[tx.clone()]);
                 let block = Block {
                     header: BlockHeader {
@@ -1626,7 +1641,7 @@ mod tests {
                 timestamp += 1;
                 let reward = Blockchain::subsidy_for_height(i as u64, mined);
                 mined += reward;
-                let tx = coinbase_transaction(&addr, reward);
+                let tx = coinbase_transaction(&addr, reward).unwrap();
                 let merkle = compute_merkle_root(&[tx.clone()]);
                 let block = Block {
                     header: BlockHeader {

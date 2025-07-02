@@ -40,7 +40,7 @@ async fn finalize_block_on_votes() {
         let chain_handle = node.chain_handle();
         let mut chain = chain_handle.lock().await;
         let reward = chain.block_subsidy();
-        let tx1 = coinbase_transaction(A1, reward);
+        let tx1 = coinbase_transaction(A1, reward).unwrap();
         let merkle1 = compute_merkle_root(&[tx1.clone()]);
         chain.add_block(Block {
             header: BlockHeader {
@@ -53,7 +53,7 @@ async fn finalize_block_on_votes() {
             transactions: vec![tx1],
         });
         let prev = chain.last_block_hash().unwrap();
-        let tx2 = coinbase_transaction(A2, reward);
+        let tx2 = coinbase_transaction(A2, reward).unwrap();
         let merkle2 = compute_merkle_root(&[tx2.clone()]);
         chain.add_block(Block {
             header: BlockHeader {
