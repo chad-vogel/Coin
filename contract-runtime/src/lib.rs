@@ -82,6 +82,96 @@ impl Runtime {
                 caller.data_mut().insert(key, val);
             },
         )?;
+        linker.func_wrap(
+            "env",
+            "get_bool",
+            |caller: Caller<'_, HashMap<i32, i64>>, key: i32| {
+                if *caller.data().get(&key).unwrap_or(&0) != 0 {
+                    1i32
+                } else {
+                    0i32
+                }
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_bool",
+            |mut caller: Caller<'_, HashMap<i32, i64>>, key: i32, val: i32| {
+                caller.data_mut().insert(key, if val == 0 { 0 } else { 1 });
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "get_u128",
+            |caller: Caller<'_, HashMap<i32, i64>>, base: i32| {
+                (
+                    *caller.data().get(&base).unwrap_or(&0),
+                    *caller.data().get(&(base + 1)).unwrap_or(&0),
+                )
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_u128",
+            |mut caller: Caller<'_, HashMap<i32, i64>>, base: i32, lo: i64, hi: i64| {
+                caller.data_mut().insert(base, lo);
+                caller.data_mut().insert(base + 1, hi);
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "get_u256",
+            |caller: Caller<'_, HashMap<i32, i64>>, base: i32| {
+                (
+                    *caller.data().get(&base).unwrap_or(&0),
+                    *caller.data().get(&(base + 1)).unwrap_or(&0),
+                    *caller.data().get(&(base + 2)).unwrap_or(&0),
+                    *caller.data().get(&(base + 3)).unwrap_or(&0),
+                )
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_u256",
+            |mut caller: Caller<'_, HashMap<i32, i64>>,
+             base: i32,
+             a: i64,
+             b: i64,
+             c: i64,
+             d: i64| {
+                caller.data_mut().insert(base, a);
+                caller.data_mut().insert(base + 1, b);
+                caller.data_mut().insert(base + 2, c);
+                caller.data_mut().insert(base + 3, d);
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "get_address",
+            |caller: Caller<'_, HashMap<i32, i64>>, base: i32| {
+                (
+                    *caller.data().get(&base).unwrap_or(&0),
+                    *caller.data().get(&(base + 1)).unwrap_or(&0),
+                    *caller.data().get(&(base + 2)).unwrap_or(&0),
+                    *caller.data().get(&(base + 3)).unwrap_or(&0),
+                )
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_address",
+            |mut caller: Caller<'_, HashMap<i32, i64>>,
+             base: i32,
+             a: i64,
+             b: i64,
+             c: i64,
+             d: i64| {
+                caller.data_mut().insert(base, a);
+                caller.data_mut().insert(base + 1, b);
+                caller.data_mut().insert(base + 2, c);
+                caller.data_mut().insert(base + 3, d);
+            },
+        )?;
         let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
         let func = instance.get_typed_func::<(), i64>(&store, "main")?;
         let result = match func.call(&mut store, ()) {

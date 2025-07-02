@@ -188,7 +188,10 @@ rustc --target wasm32-unknown-unknown -O contract-runtime/examples/counter.rs -o
 
 - `simple.rs` returns `42` from its `main` function.
 - `counter.rs` increments an internal counter stored under key `0` via the host
-  `get` and `set` functions.
+  `get` and `set` functions. The runtime also exposes helpers for boolean,
+  128-bit, 256-bit and address values through `get_bool`/`set_bool`,
+  `get_u128`/`set_u128`, `get_u256`/`set_u256` and
+  `get_address`/`set_address`.
 - `token.rs` demonstrates 256-bit arithmetic by minting
   `100,000,000,000,000,000,000,000,000` tokens to Alice on first run. Balances
   are stored across four 64-bit slots per account and one token is transferred
