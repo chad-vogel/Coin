@@ -509,7 +509,8 @@ impl Blockchain {
                 } else if let Ok(inv) =
                     serde_json::from_slice::<contract_runtime::InvokePayload>(&tx.encrypted_message)
                 {
-                    let _ = self.runtime.execute(&inv.contract);
+                    let mut gas = 1_000_000;
+                    let _ = self.runtime.execute(&inv.contract, &mut gas);
                 }
             }
         }
