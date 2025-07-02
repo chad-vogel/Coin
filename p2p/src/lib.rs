@@ -784,6 +784,8 @@ impl Node {
                                                     }
                                                 }
                                             }
+                                            RpcMessage::Stake(_) => {}
+                                            RpcMessage::Unstake(_) => {}
                                             RpcMessage::Schedule(_) => {}
                                             RpcMessage::Balance(_) => {}
                                             RpcMessage::TransactionDetail(_) => {}

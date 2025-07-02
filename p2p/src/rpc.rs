@@ -1,6 +1,6 @@
 use coin_proto::{
     Balance, Block, Chain, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers, GetTransaction,
-    Handshake, Peers, Ping, Pong, Schedule, Transaction, TransactionDetail, Vote,
+    Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail, Unstake, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json::{Value, json};
@@ -23,6 +23,8 @@ pub enum RpcMessage {
     Block(Block),
     Balance(Balance),
     TransactionDetail(TransactionDetail),
+    Stake(Stake),
+    Unstake(Unstake),
     Vote(Vote),
     Schedule(Schedule),
     Handshake(Handshake),
@@ -48,6 +50,8 @@ pub fn encode_message(msg: &RpcMessage) -> JsonRpc {
         RpcMessage::TransactionDetail(t) => {
             JsonRpc::notification_with_params("transactionDetail", json!(t))
         }
+        RpcMessage::Stake(s) => JsonRpc::notification_with_params("stake", json!(s)),
+        RpcMessage::Unstake(u) => JsonRpc::notification_with_params("unstake", json!(u)),
         RpcMessage::Vote(v) => JsonRpc::notification_with_params("vote", json!(v)),
         RpcMessage::Schedule(s) => JsonRpc::notification_with_params("schedule", json!(s)),
         RpcMessage::Handshake(h) => JsonRpc::notification_with_params("handshake", json!(h)),
@@ -100,6 +104,14 @@ pub fn decode_message(rpc: JsonRpc) -> Option<RpcMessage> {
             .get_params()
             .and_then(|p| serde_json::from_value::<TransactionDetail>(params_to_value(p)).ok())
             .map(RpcMessage::TransactionDetail),
+        "stake" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<Stake>(params_to_value(p)).ok())
+            .map(RpcMessage::Stake),
+        "unstake" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<Unstake>(params_to_value(p)).ok())
+            .map(RpcMessage::Unstake),
         "vote" => rpc
             .get_params()
             .and_then(|p| serde_json::from_value::<Vote>(params_to_value(p)).ok())
@@ -236,6 +248,36 @@ mod tests {
         let decoded = decode_message(rpc).unwrap();
         match decoded {
             RpcMessage::GetBalance(g) => assert_eq!(g.address, "a"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn stake_encode_decode_roundtrip() {
+        let msg = RpcMessage::Stake(Stake {
+            address: "a".into(),
+            amount: 5,
+        });
+        let rpc = encode_message(&msg);
+        let decoded = decode_message(rpc).unwrap();
+        match decoded {
+            RpcMessage::Stake(s) => {
+                assert_eq!(s.address, "a");
+                assert_eq!(s.amount, 5);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn unstake_encode_decode_roundtrip() {
+        let msg = RpcMessage::Unstake(Unstake {
+            address: "a".into(),
+        });
+        let rpc = encode_message(&msg);
+        let decoded = decode_message(rpc).unwrap();
+        match decoded {
+            RpcMessage::Unstake(u) => assert_eq!(u.address, "a"),
             _ => panic!("wrong variant"),
         }
     }

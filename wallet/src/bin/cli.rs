@@ -56,6 +56,19 @@ mod real_cli {
             #[arg(long, default_value = "127.0.0.1:9000")]
             node: String,
         },
+        /// Stake coins from a path
+        Stake {
+            amount: u64,
+            path: String,
+            #[arg(long, default_value = "127.0.0.1:9000")]
+            node: String,
+        },
+        /// Unstake coins for a path
+        Unstake {
+            path: String,
+            #[arg(long, default_value = "127.0.0.1:9000")]
+            node: String,
+        },
     }
 
     fn write_wallet(path: &str, phrase: &str, password: &str) -> Result<()> {
@@ -86,13 +99,14 @@ mod real_cli {
         if bytes.len() < 16 {
             return Err(anyhow!("invalid wallet file"));
         }
-        let (salt, mut enc) = bytes.split_at(16);
+        let (salt, enc) = bytes.split_at(16);
+        let mut data = enc.to_vec();
         let mut key = [0u8; 32];
         pbkdf2_hmac::<Sha256>(pw.as_bytes(), salt, 100_000, &mut key);
-        for (i, b) in enc.iter_mut().enumerate() {
+        for (i, b) in data.iter_mut().enumerate() {
             *b ^= key[i % key.len()];
         }
-        let phrase = String::from_utf8(enc.to_vec())?;
+        let phrase = String::from_utf8(data)?;
         Ok(Wallet::from_mnemonic(&phrase, "").map_err(|e| anyhow!("{:?}", e))?)
     }
 
@@ -199,6 +213,20 @@ mod real_cli {
         Ok(())
     }
 
+    async fn send_stake(addr: &str, stake: &coin_proto::Stake) -> Result<()> {
+        let mut stream = rpc_connect(addr).await?;
+        let msg = RpcMessage::Stake(stake.clone());
+        write_msg(&mut stream, &msg).await?;
+        Ok(())
+    }
+
+    async fn send_unstake(addr: &str, unstake: &coin_proto::Unstake) -> Result<()> {
+        let mut stream = rpc_connect(addr).await?;
+        let msg = RpcMessage::Unstake(unstake.clone());
+        write_msg(&mut stream, &msg).await?;
+        Ok(())
+    }
+
     #[cfg(not(tarpaulin))]
     pub async fn run() -> Result<()> {
         let cli = Cli::parse();
@@ -262,6 +290,27 @@ mod real_cli {
                 tx.sign(child.secret_key());
                 send_transaction(&node, &tx).await?;
                 println!("Transaction sent");
+            }
+            Commands::Stake { amount, path, node } => {
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
+                let addr = wallet
+                    .derive_address(&path)
+                    .map_err(|e| anyhow!("{:?}", e))?;
+                let stake = coin_proto::Stake {
+                    address: addr,
+                    amount,
+                };
+                send_stake(&node, &stake).await?;
+                println!("Stake sent");
+            }
+            Commands::Unstake { path, node } => {
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
+                let addr = wallet
+                    .derive_address(&path)
+                    .map_err(|e| anyhow!("{:?}", e))?;
+                let unstake = coin_proto::Unstake { address: addr };
+                send_unstake(&node, &unstake).await?;
+                println!("Unstake sent");
             }
         }
         Ok(())
