@@ -14,7 +14,7 @@ use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 pub struct Runtime {
     engine: Engine,
     modules: HashMap<String, Module>,
-    state: HashMap<String, HashMap<i32, i32>>,
+    state: HashMap<String, HashMap<i32, i64>>,
 }
 
 impl Default for Runtime {
@@ -24,7 +24,7 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    fn load_state() -> HashMap<String, HashMap<i32, i32>> {
+    fn load_state() -> HashMap<String, HashMap<i32, i64>> {
         let path = state_path();
         if let Ok(data) = fs::read_to_string(path) {
             serde_json::from_str(&data).unwrap_or_default()
@@ -56,7 +56,7 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn execute(&mut self, addr: &str, gas: &mut u64) -> anyhow::Result<i32> {
+    pub fn execute(&mut self, addr: &str, gas: &mut u64) -> anyhow::Result<i64> {
         let module = self
             .modules
             .get(addr)
@@ -71,19 +71,19 @@ impl Runtime {
         linker.func_wrap(
             "env",
             "get",
-            |caller: Caller<'_, HashMap<i32, i32>>, key: i32| {
+            |caller: Caller<'_, HashMap<i32, i64>>, key: i32| {
                 *caller.data().get(&key).unwrap_or(&0)
             },
         )?;
         linker.func_wrap(
             "env",
             "set",
-            |mut caller: Caller<'_, HashMap<i32, i32>>, key: i32, val: i32| {
+            |mut caller: Caller<'_, HashMap<i32, i64>>, key: i32, val: i64| {
                 caller.data_mut().insert(key, val);
             },
         )?;
         let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
-        let func = instance.get_typed_func::<(), i32>(&store, "main")?;
+        let func = instance.get_typed_func::<(), i64>(&store, "main")?;
         let result = match func.call(&mut store, ()) {
             Ok(res) => res,
             Err(e) => {
