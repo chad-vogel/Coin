@@ -103,6 +103,25 @@ async fn test_http_endpoints() {
     assert_eq!(v["method"], "chain");
     assert_eq!(v["params"]["blocks"].as_array().unwrap().len(), 1);
 
+    let resp = client
+        .get(&format!("http://{}/mempool", addr))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let v: Value = resp.json().await.unwrap();
+    assert_eq!(v["method"], "chain");
+
+    let resp = client
+        .get(&format!("http://{}/status", addr))
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let v: Value = resp.json().await.unwrap();
+    assert!(v["peers"].as_u64().unwrap() >= 1);
+    assert_eq!(v["height"], 1);
+
     server.abort();
 }
 

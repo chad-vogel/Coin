@@ -86,13 +86,14 @@ mod real_cli {
         if bytes.len() < 16 {
             return Err(anyhow!("invalid wallet file"));
         }
-        let (salt, mut enc) = bytes.split_at(16);
+        let (salt, enc_bytes) = bytes.split_at(16);
+        let mut enc = enc_bytes.to_vec();
         let mut key = [0u8; 32];
         pbkdf2_hmac::<Sha256>(pw.as_bytes(), salt, 100_000, &mut key);
         for (i, b) in enc.iter_mut().enumerate() {
             *b ^= key[i % key.len()];
         }
-        let phrase = String::from_utf8(enc.to_vec())?;
+        let phrase = String::from_utf8(enc)?;
         Ok(Wallet::from_mnemonic(&phrase, "").map_err(|e| anyhow!("{:?}", e))?)
     }
 
