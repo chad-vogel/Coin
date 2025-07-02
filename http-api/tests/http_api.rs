@@ -242,3 +242,37 @@ async fn test_forward_rpc_timeout() {
 
     server.abort();
 }
+
+#[tokio::test]
+async fn test_serve_function() {
+    use tokio::time::{Duration, sleep};
+    let node = Node::new(
+        vec!["0.0.0.0:0".parse().unwrap()],
+        NodeType::Wallet,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (addrs, _) = node.start().await.unwrap();
+    let node_addr = addrs[0];
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    let server = tokio::spawn(async move {
+        coin_http::serve(&addr.to_string(), &node_addr.to_string())
+            .await
+            .unwrap();
+    });
+    sleep(Duration::from_millis(50)).await;
+    let resp = reqwest::get(&format!("http://{}/status", addr))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    server.abort();
+}
