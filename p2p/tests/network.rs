@@ -1,3 +1,4 @@
+use coin::TransactionExt;
 use coin::{Block, BlockHeader, coinbase_transaction, compute_merkle_root};
 use coin_p2p::{
     Node, NodeType,
@@ -23,6 +24,12 @@ fn sign_vote(path: &str, vote: &mut Vote) {
     let wallet = Wallet::from_seed(&SEED).unwrap();
     let sk = wallet.derive_priv(path).unwrap().secret_key().clone();
     vote.sign(&sk);
+}
+
+fn sign_for(path: &str, tx: &mut Transaction) {
+    let wallet = Wallet::from_seed(&SEED).unwrap();
+    let sk = wallet.derive_priv(path).unwrap().secret_key().clone();
+    tx.sign(&sk);
 }
 
 async fn handshake_peer(addr: SocketAddr) -> tokio::io::Result<TcpStream> {
@@ -273,7 +280,8 @@ async fn contract_state_sync() {
     {
         let handle = node_a.chain_handle();
         let mut chain = handle.lock().await;
-        let tx: Transaction = contract_runtime::ContractTxExt::deploy_tx(A1, wasm.clone());
+        let mut tx: Transaction = contract_runtime::ContractTxExt::deploy_tx(A1, wasm.clone());
+        sign_for("m/0'/0/0", &mut tx);
         let block = Block {
             header: BlockHeader {
                 previous_hash: String::new(),
@@ -285,7 +293,8 @@ async fn contract_state_sync() {
             transactions: vec![tx],
         };
         let _ = chain.add_block(block);
-        let inv: Transaction = contract_runtime::ContractTxExt::invoke_tx(A2, A1);
+        let mut inv: Transaction = contract_runtime::ContractTxExt::invoke_tx(A2, A1);
+        sign_for("m/0'/0/1", &mut inv);
         let block2 = Block {
             header: BlockHeader {
                 previous_hash: chain.last_block_hash().unwrap(),
