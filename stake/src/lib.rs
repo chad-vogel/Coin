@@ -473,6 +473,8 @@ mod tests {
     fn equivocation_slashes() {
         let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
         let addr = address_from_secret(&sk);
+        let sk2 = SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let addr2 = address_from_secret(&sk2);
         let mut bc = Blockchain::new();
         bc.add_block(coin::Block {
             header: coin::BlockHeader {
@@ -482,12 +484,13 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy())],
+            transactions: vec![
+                coin::coinbase_transaction(&addr, bc.block_subsidy()),
+                coin::coinbase_transaction(&addr2, bc.block_subsidy()),
+            ],
         });
         let mut reg = StakeRegistry::new();
         assert!(reg.stake(&mut bc, &addr, 10, 0));
-        let sk2 = SecretKey::from_slice(&[2u8; 32]).unwrap();
-        let addr2 = address_from_secret(&sk2);
         assert!(reg.stake(&mut bc, &addr2, 10, 0));
         let mut cs = ConsensusState::new(reg);
         cs.start_round("h1".into(), 1);
