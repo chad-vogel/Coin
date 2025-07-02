@@ -34,10 +34,9 @@ async fn test_http_endpoints() {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(
-                "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr",
-                reward,
-            )],
+            transactions: vec![
+                coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", reward).unwrap(),
+            ],
         });
     }
     let (addrs, _) = node.start().await.unwrap();

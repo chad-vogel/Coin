@@ -39,7 +39,9 @@ pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
     let index = next_index(dir)?;
     let path = blockfile_path(dir, index);
     let mut file = File::create(&path)?;
-    let data = bincode::serialize(block).unwrap();
+    let data = bincode::serialize(block).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
+    })?;
     file.write_all(&MAGIC_BYTES)?;
     file.write_all(&(data.len() as u32).to_le_bytes())?;
     file.write_all(&data)?;
@@ -95,7 +97,8 @@ mod tests {
     fn append_and_read_blocks_roundtrip() {
         let dir = tempdir().unwrap();
         let mut bc = Blockchain::new();
-        let tx = coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy());
+        let tx =
+            coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: crate::BlockHeader {
                 previous_hash: String::new(),
@@ -117,7 +120,8 @@ mod tests {
     fn append_creates_separate_files() {
         let dir = tempdir().unwrap();
         let mut bc = Blockchain::new();
-        let tx = coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy());
+        let tx =
+            coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy()).unwrap();
         bc.add_block(Block {
             header: crate::BlockHeader {
                 previous_hash: String::new(),

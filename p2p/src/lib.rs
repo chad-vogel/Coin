@@ -1071,7 +1071,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1.clone(), reward)],
+                transactions: vec![coinbase_transaction(A1.clone(), reward).unwrap()],
             });
         }
         node.connect(addr).await.unwrap();
@@ -1677,7 +1677,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1, reward)],
+                transactions: vec![coinbase_transaction(A1, reward).unwrap()],
             });
             let mut tx = Transaction {
                 sender: A1.into(),
@@ -1724,7 +1724,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1, reward)],
+                transactions: vec![coinbase_transaction(A1, reward).unwrap()],
             });
             let mut tx = Transaction {
                 sender: A1.into(),
@@ -2048,7 +2048,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1, reward)],
+                transactions: vec![coinbase_transaction(A1, reward).unwrap()],
             };
             let hash = block.hash();
             chain.add_block(block.clone());
@@ -2107,7 +2107,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1, reward)],
+                transactions: vec![coinbase_transaction(A1, reward).unwrap()],
             });
         }
 
@@ -2248,7 +2248,7 @@ mod tests {
         std::env::set_current_dir(dir.path()).unwrap();
         {
             let mut chain = Blockchain::new();
-            chain.add_transaction(coinbase_transaction(A1, 5));
+            chain.add_transaction(coinbase_transaction(A1, 5).unwrap());
             chain.save_mempool("mempool.bin").unwrap();
         }
 
@@ -2301,7 +2301,7 @@ mod tests {
                     nonce: 0,
                     difficulty: 0,
                 },
-                transactions: vec![coinbase_transaction(A1, reward)],
+                transactions: vec![coinbase_transaction(A1, reward).unwrap()],
             });
             reward
         };
@@ -2358,7 +2358,7 @@ mod tests {
                         nonce: 0,
                         difficulty: 0,
                     },
-                    transactions: vec![coinbase_transaction(A1, reward)],
+                    transactions: vec![coinbase_transaction(A1, reward).unwrap()],
                 });
             }
         }
@@ -2405,7 +2405,7 @@ mod tests {
         let tx_hash = {
             let mut chain = node.chain.lock().await;
             let reward = chain.block_subsidy();
-            let tx = coinbase_transaction(A1, reward);
+            let tx = coinbase_transaction(A1, reward).unwrap();
             let hash = tx.hash();
             chain.add_block(Block {
                 header: BlockHeader {

@@ -35,7 +35,7 @@ pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
     let reward = chain.block_subsidy() + fee_total;
     block
         .transactions
-        .insert(0, coinbase_transaction(miner.to_string(), reward));
+        .insert(0, coinbase_transaction(miner.to_string(), reward).unwrap());
     block.header.merkle_root = compute_merkle_root(&block.transactions);
     block.header.difficulty = difficulty;
 
@@ -62,7 +62,7 @@ pub fn mine_block_threads(chain: &mut Blockchain, miner: &str, threads: usize) -
     let fee_total: u64 = base.transactions.iter().map(|t| t.fee).sum();
     let reward = chain.block_subsidy() + fee_total;
     base.transactions
-        .insert(0, coinbase_transaction(miner.to_string(), reward));
+        .insert(0, coinbase_transaction(miner.to_string(), reward).unwrap());
     base.header.merkle_root = compute_merkle_root(&base.transactions);
     base.header.difficulty = difficulty;
 
@@ -136,9 +136,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy()).unwrap()],
         });
-        let mut tx = new_transaction(A1, A2, 1);
+        let mut tx = new_transaction(A1, A2, 1).unwrap();
         sign_a1(&mut tx);
         assert!(bc.add_transaction(tx));
         let len_before = bc.len();
@@ -171,9 +171,9 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, reward1)],
+            transactions: vec![coinbase_transaction(A1, reward1).unwrap()],
         });
-        let mut tx = new_transaction_with_fee(A1, A2, 1, 2);
+        let mut tx = new_transaction_with_fee(A1, A2, 1, 2).unwrap();
         sign_a1(&mut tx);
         assert!(bc.add_transaction(tx));
         let reward2 = bc.block_subsidy();
@@ -193,7 +193,7 @@ mod tests {
                 nonce: 0,
                 difficulty: 0,
             },
-            transactions: vec![coinbase_transaction(A1, bc.block_subsidy())],
+            transactions: vec![coinbase_transaction(A1, bc.block_subsidy()).unwrap()],
         });
         let len_before = bc.len();
         let block = mine_block_threads(&mut bc, A1, 2);

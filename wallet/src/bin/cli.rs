@@ -288,7 +288,8 @@ mod real_cli {
                 let from = wallet
                     .derive_address(&path)
                     .map_err(|e| anyhow!("{:?}", e))?;
-                let mut tx = new_transaction_with_fee(&from, to, amount, fee);
+                let mut tx = new_transaction_with_fee(&from, to, amount, fee)
+                    .map_err(|e| anyhow!("{:?}", e))?;
                 tx.sign(child.secret_key());
                 send_transaction(&node, &tx).await?;
                 println!("Transaction sent");
