@@ -151,3 +151,68 @@ pub async fn serve(addr: &str, node: &str) -> hyper::Result<()> {
     let server = Server::bind(&addr.parse().unwrap()).serve(make_svc);
     server.await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
+    use coin_proto::{Balance, GetBalance, Handshake};
+    use reqwest::Client;
+    use tokio::net::TcpListener;
+    use tokio::time::{Duration, sleep};
+
+    #[tokio::test]
+    async fn forward_rpc_success() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            if let RpcMessage::Handshake(_) = read_rpc(&mut stream).await.unwrap() {
+                let reply = RpcMessage::Handshake(Handshake {
+                    network_id: "coin".into(),
+                    version: 1,
+                    public_key: vec![],
+                    signature: vec![],
+                });
+                write_rpc(&mut stream, &reply).await.unwrap();
+            }
+            if let RpcMessage::GetBalance(gb) = read_rpc(&mut stream).await.unwrap() {
+                assert_eq!(gb.address, "alice");
+                let resp = RpcMessage::Balance(Balance { amount: 5 });
+                write_rpc(&mut stream, &resp).await.unwrap();
+            }
+        });
+
+        let msg = RpcMessage::GetBalance(GetBalance {
+            address: "alice".into(),
+        });
+        let resp = super::forward_rpc(addr, &msg).await.unwrap();
+        match resp {
+            Some(RpcMessage::Balance(b)) => assert_eq!(b.amount, 5),
+            _ => panic!("unexpected response"),
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn serve_status() {
+        let tmp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = tmp.local_addr().unwrap();
+        drop(tmp);
+        let server = tokio::spawn(async move {
+            serve(&addr.to_string(), "127.0.0.1:9").await.unwrap();
+        });
+        // give the server a moment to start
+        sleep(Duration::from_millis(100)).await;
+
+        let url = format!("http://{}/status", addr);
+        let client = Client::new();
+        let resp = client.get(&url).send().await.unwrap();
+        assert!(resp.status().is_success());
+        let v: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(v["peers"], 0);
+        assert_eq!(v["height"], 0);
+
+        server.abort();
+    }
+}

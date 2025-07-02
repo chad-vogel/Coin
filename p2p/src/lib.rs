@@ -2442,4 +2442,64 @@ mod tests {
             other => panic!("expected TransactionDetail, got {:?}", other),
         }
     }
+
+    #[test]
+    fn load_or_create_key_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("key.bin");
+        let path_str = path.to_str().unwrap();
+        let (sk1, pk1) = load_or_create_key(path_str);
+        assert!(path.exists());
+        let data = std::fs::read(&path).unwrap();
+        assert_eq!(data, sk1.secret_bytes());
+        let (sk2, pk2) = load_or_create_key(path_str);
+        assert_eq!(sk1.secret_bytes(), sk2.secret_bytes());
+        assert_eq!(pk1.serialize(), pk2.serialize());
+    }
+
+    #[tokio::test]
+    async fn connect_with_proxy_none() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let srv = tokio::spawn(async move {
+            let _ = listener.accept().await.unwrap();
+        });
+        let _stream = connect_with_proxy(addr, None).await.unwrap();
+        srv.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn connect_with_proxy_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        // proxy address that isn't running
+        let proxy: SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let res = connect_with_proxy(addr, Some(proxy)).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn read_with_timeout_variants() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // send a ping so client receives something
+            let msg = RpcMessage::Ping;
+            write_msg(&mut stream, &msg).await.unwrap();
+        });
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        assert_eq!(read_with_timeout(&mut stream).await.unwrap(), true);
+        server.await.unwrap();
+
+        // timeout path
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(4)).await;
+        });
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        assert_eq!(read_with_timeout(&mut stream).await.unwrap(), false);
+    }
 }
