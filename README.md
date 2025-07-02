@@ -178,6 +178,21 @@ assert_eq!(result, 42);
 let deploy_tx: Transaction = ContractTxExt::deploy_tx("alice", wasm.clone());
 let invoke_tx: Transaction = ContractTxExt::invoke_tx("bob", "alice");
 ```
+# Example Contracts
+Rust examples are provided in `contract-runtime/examples` and can be compiled
+to WebAssembly with the `wasm32-unknown-unknown` target:
+
+```bash
+rustc --target wasm32-unknown-unknown -O contract-runtime/examples/counter.rs -o counter.wasm
+```
+
+- `simple.rs` returns `42` from its `main` function.
+- `counter.rs` increments an internal counter stored under key `0` via the host
+  `get` and `set` functions.
+- `token.rs` demonstrates 256-bit arithmetic by minting
+  `100,000,000,000,000,000,000,000,000` tokens to Alice on first run. Balances
+  are stored across four 64-bit slots per account and one token is transferred
+  to Bob on each subsequent execution.
 
 ## Development
 

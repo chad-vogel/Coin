@@ -6,7 +6,7 @@ use tempfile;
 #[test]
 fn deploy_and_invoke() {
     // wasm module that returns 42 from main
-    let wat = "(module (func (export \"main\") (result i32) i32.const 42))";
+    let wat = "(module (func (export \"main\") (result i64) i64.const 42))";
     let wasm = wat::parse_str(wat).expect("compile");
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).expect("deploy");
@@ -35,12 +35,12 @@ fn tx_helpers() {
 fn state_persistence() {
     let wat = r#"
     (module
-        (import "env" "get" (func $get (param i32) (result i32)))
-        (import "env" "set" (func $set (param i32 i32)))
-        (func (export "main") (result i32)
-            (local $v i32)
+        (import "env" "get" (func $get (param i32) (result i64)))
+        (import "env" "set" (func $set (param i32 i64)))
+        (func (export "main") (result i64)
+            (local $v i64)
             (local.set $v (call $get (i32.const 0)))
-            (call $set (i32.const 0) (i32.add (local.get $v) (i32.const 1)))
+            (call $set (i32.const 0) (i64.add (local.get $v) (i64.const 1)))
             (call $get (i32.const 0))
         )
     )
@@ -67,12 +67,12 @@ fn state_persistence() {
 fn state_reload_from_disk() {
     let wat = r#"
     (module
-        (import "env" "get" (func $get (param i32) (result i32)))
-        (import "env" "set" (func $set (param i32 i32)))
-        (func (export "main") (result i32)
-            (local $v i32)
+        (import "env" "get" (func $get (param i32) (result i64)))
+        (import "env" "set" (func $set (param i32 i64)))
+        (func (export "main") (result i64)
+            (local $v i64)
             (local.set $v (call $get (i32.const 0)))
-            (call $set (i32.const 0) (i32.add (local.get $v) (i32.const 1)))
+            (call $set (i32.const 0) (i64.add (local.get $v) (i64.const 1)))
             (call $get (i32.const 0))
         )
     )
@@ -100,7 +100,7 @@ fn state_reload_from_disk() {
 }
 #[test]
 fn out_of_gas() {
-    let wat = "(module (func (export \"main\") (result i32) i32.const 1))";
+    let wat = "(module (func (export \"main\") (result i64) i64.const 1))";
     let wasm = wat::parse_str(wat).unwrap();
     let mut rt = Runtime::new();
     rt.deploy("carol", &wasm).unwrap();
@@ -111,7 +111,7 @@ fn out_of_gas() {
 #[test]
 fn gas_consumption() {
     // empty function that returns 0
-    let wat = "(module (func (export \"main\") (result i32) i32.const 0))";
+    let wat = "(module (func (export \"main\") (result i64) i64.const 0))";
     let wasm = wat::parse_str(wat).unwrap();
     let mut rt = Runtime::new();
     rt.deploy("dave", &wasm).unwrap();
