@@ -125,6 +125,17 @@ pub struct Schedule {
     pub validator: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Stake {
+    pub address: String,
+    pub amount: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Unstake {
+    pub address: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +248,26 @@ mod tests {
         let data = serde_json::to_vec(&detail).unwrap();
         let decoded: TransactionDetail = serde_json::from_slice(&data).unwrap();
         assert_eq!(detail, decoded);
+    }
+
+    #[test]
+    fn stake_roundtrip() {
+        let req = Stake {
+            address: "addr".into(),
+            amount: 10,
+        };
+        let data = serde_json::to_vec(&req).unwrap();
+        let decoded: Stake = serde_json::from_slice(&data).unwrap();
+        assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn unstake_roundtrip() {
+        let req = Unstake {
+            address: "addr".into(),
+        };
+        let data = serde_json::to_vec(&req).unwrap();
+        let decoded: Unstake = serde_json::from_slice(&data).unwrap();
+        assert_eq!(req, decoded);
     }
 }
