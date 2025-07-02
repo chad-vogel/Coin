@@ -10,6 +10,7 @@ use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
 use stake::Vote;
 use std::net::SocketAddr;
+use tempfile;
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep, timeout};
 
@@ -56,6 +57,10 @@ async fn handshake_peer(addr: SocketAddr) -> tokio::io::Result<TcpStream> {
 #[tokio::test]
 async fn network_votes_finalize_block() {
     timeout(Duration::from_secs(20), async {
+        let dir = tempfile::tempdir().unwrap();
+        unsafe {
+            std::env::set_var("BLOCK_DIR", dir.path());
+        }
         let node_a = Node::with_interval(
             vec!["127.0.0.1:0".parse().unwrap()],
             Duration::from_millis(50),

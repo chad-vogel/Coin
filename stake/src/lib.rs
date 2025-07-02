@@ -237,7 +237,7 @@ impl ConsensusState {
         }
         self.votes
             .insert(vote.validator.clone(), vote.block_hash.clone());
-        if self.voted_stake() * 3 > self.registry.total_stake(self.current_height) * 2 {
+        if self.voted_stake() * 3 > self.registry.total_stake(self.current_height + 1) * 2 {
             if let Some(h) = self.current_hash.take() {
                 self.finalized.insert(h);
             }
