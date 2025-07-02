@@ -36,10 +36,10 @@ fn serialize_error<E: std::fmt::Display>(e: E) -> std::io::Error {
 
 /// Determine the next block index by examining existing keys.
 fn next_index(db: &DB) -> u32 {
-    db.iterator(IteratorMode::End)
-        .next()
-        .map(|(k, _)| u32::from_be_bytes(k.as_ref().try_into().unwrap()) + 1)
-        .unwrap_or(0)
+    match db.iterator(IteratorMode::End).next() {
+        Some(Ok((k, _))) => u32::from_be_bytes(k.as_ref().try_into().unwrap()) + 1,
+        _ => 0,
+    }
 }
 
 /// Append `block` to the RocksDB database located at `dir`.
@@ -59,7 +59,8 @@ pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
     migrate_from_files(dir)?;
     let db = open_db(dir)?;
     let mut blocks = Vec::new();
-    for (_, v) in db.iterator(IteratorMode::Start) {
+    for item in db.iterator(IteratorMode::Start) {
+        let (_, v) = item.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let block: Block = bincode::deserialize(&v)
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "decode error"))?;
         blocks.push(block);
