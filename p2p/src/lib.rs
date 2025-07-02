@@ -406,6 +406,18 @@ impl Node {
         }
     }
 
+    async fn load_finalized(&self) {
+        let path = std::path::Path::new(&block_dir()).join("finalized.json");
+        if let Ok(data) = tokio::fs::read(&path).await {
+            if let Ok(list) = serde_json::from_slice::<Vec<String>>(&data) {
+                let mut cs = self.consensus.lock().await;
+                for h in list {
+                    cs.add_finalized(h);
+                }
+            }
+        }
+    }
+
     pub async fn save_peers(&self) -> tokio::io::Result<()> {
         let list: Vec<SocketAddr> = self.peers.lock().await.iter().cloned().collect();
         let data = bincode::serialize(&list)
@@ -536,7 +548,8 @@ impl Node {
                             proxy,
                         )
                         .await;
-                        consensus.lock().await.start_round(hash);
+                        let height = chain.len() as u64;
+                        consensus.lock().await.start_round(hash, height);
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -548,6 +561,7 @@ impl Node {
     pub async fn start(&self) -> tokio::io::Result<(Vec<SocketAddr>, mpsc::Receiver<Transaction>)> {
         self.running.store(true, Ordering::SeqCst);
         self.load_peers().await;
+        self.load_finalized().await;
 
         self.restore_mempool().await;
         self.spawn_mempool_saver();
@@ -759,7 +773,11 @@ impl Node {
                                                     if valid_block(&chain, &block) {
                                                         let hash = block.hash();
                                                         chain.add_block(block);
-                                                        consensus.lock().await.start_round(hash);
+                                                        let height = chain.len() as u64;
+                                                        consensus
+                                                            .lock()
+                                                            .await
+                                                            .start_round(hash, height);
                                                     }
                                                 }
                                             }
@@ -785,6 +803,9 @@ impl Node {
                                                 }
                                             }
                                             RpcMessage::Schedule(_) => {}
+                                            RpcMessage::Finalized(f) => {
+                                                consensus.lock().await.add_finalized(f.hash);
+                                            }
                                             RpcMessage::Stake(_) => {}
                                             RpcMessage::Unstake(_) => {}
                                             RpcMessage::Balance(_) => {}
@@ -938,6 +959,21 @@ impl Node {
         Ok(())
     }
 
+    pub async fn broadcast_finalized(&self, hash: &str) -> tokio::io::Result<()> {
+        let msg = RpcMessage::Finalized(coin_proto::Finalized { hash: hash.into() });
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
+        for addr in list {
+            if let Ok(mut stream) = self.connect_stream(addr).await {
+                let hs = RpcMessage::Handshake(self.build_handshake());
+                if write_msg(&mut stream, &hs).await.is_ok() {
+                    let _ = read_msg(&mut stream).await;
+                    let _ = write_msg(&mut stream, &msg).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn handle_vote(&self, vote: &StakeVote) {
         let finalized = {
             let mut cs = self.consensus.lock().await;
@@ -951,8 +987,15 @@ impl Node {
             let mut chain = self.chain.lock().await;
             let _ = chain.save(&block_dir());
             let slot = chain.len() as u64;
+            {
+                let mut cs = self.consensus.lock().await;
+                cs.registry_mut().process_height(&mut chain, slot);
+                let path = std::path::Path::new(&block_dir()).join("finalized.json");
+                let _ = cs.save_finalized(&path);
+            }
             drop(chain);
             let _ = self.broadcast_schedule(slot).await;
+            let _ = self.broadcast_finalized(&vote.block_hash).await;
         }
     }
 
@@ -2241,6 +2284,7 @@ mod tests {
         assert!(node_a.connect(addr_b).await.is_ok());
     }
 
+    #[cfg(not(tarpaulin))]
     #[tokio::test]
     async fn mempool_file_restored_on_start() {
         let dir = tempfile::tempdir().unwrap();

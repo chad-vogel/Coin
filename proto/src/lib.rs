@@ -136,6 +136,11 @@ pub struct Unstake {
     pub address: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finalized {
+    pub hash: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +274,13 @@ mod tests {
         let data = serde_json::to_vec(&req).unwrap();
         let decoded: Unstake = serde_json::from_slice(&data).unwrap();
         assert_eq!(req, decoded);
+    }
+
+    #[test]
+    fn finalized_roundtrip() {
+        let msg = Finalized { hash: "h".into() };
+        let data = serde_json::to_vec(&msg).unwrap();
+        let decoded: Finalized = serde_json::from_slice(&data).unwrap();
+        assert_eq!(msg, decoded);
     }
 }

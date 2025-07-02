@@ -1,6 +1,7 @@
 use coin_proto::{
-    Balance, Block, Chain, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers, GetTransaction,
-    Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail, Unstake, Vote,
+    Balance, Block, Chain, Finalized, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers,
+    GetTransaction, Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail,
+    Unstake, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json::{Value, json};
@@ -27,6 +28,7 @@ pub enum RpcMessage {
     Unstake(Unstake),
     Vote(Vote),
     Schedule(Schedule),
+    Finalized(Finalized),
     Handshake(Handshake),
 }
 
@@ -54,6 +56,7 @@ pub fn encode_message(msg: &RpcMessage) -> JsonRpc {
         RpcMessage::Unstake(u) => JsonRpc::notification_with_params("unstake", json!(u)),
         RpcMessage::Vote(v) => JsonRpc::notification_with_params("vote", json!(v)),
         RpcMessage::Schedule(s) => JsonRpc::notification_with_params("schedule", json!(s)),
+        RpcMessage::Finalized(f) => JsonRpc::notification_with_params("finalized", json!(f)),
         RpcMessage::Handshake(h) => JsonRpc::notification_with_params("handshake", json!(h)),
     }
 }
@@ -120,6 +123,10 @@ pub fn decode_message(rpc: JsonRpc) -> Option<RpcMessage> {
             .get_params()
             .and_then(|p| serde_json::from_value::<Schedule>(params_to_value(p)).ok())
             .map(RpcMessage::Schedule),
+        "finalized" => rpc
+            .get_params()
+            .and_then(|p| serde_json::from_value::<Finalized>(params_to_value(p)).ok())
+            .map(RpcMessage::Finalized),
         "handshake" => rpc
             .get_params()
             .and_then(|p| serde_json::from_value::<Handshake>(params_to_value(p)).ok())
@@ -272,6 +279,14 @@ mod tests {
         let decoded = decode_message(rpc).unwrap();
         match decoded {
             RpcMessage::Unstake(u) => assert_eq!(u.address, "b"),
+            _ => panic!("wrong variant"),
+        }
+
+        let fin = RpcMessage::Finalized(Finalized { hash: "h".into() });
+        let rpc = encode_message(&fin);
+        let decoded = decode_message(rpc).unwrap();
+        match decoded {
+            RpcMessage::Finalized(f) => assert_eq!(f.hash, "h"),
             _ => panic!("wrong variant"),
         }
     }

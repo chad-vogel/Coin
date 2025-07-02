@@ -151,9 +151,9 @@ async fn network_votes_finalize_block() {
             let chain_handle = node_a.chain_handle();
             let mut cs = consensus_handle.lock().await;
             let mut chain = chain_handle.lock().await;
-            cs.registry_mut().stake(&mut chain, A1, 30);
-            cs.registry_mut().stake(&mut chain, A2, 30);
-            cs.start_round(hash.clone());
+            cs.registry_mut().stake(&mut chain, A1, 30, 2);
+            cs.registry_mut().stake(&mut chain, A2, 30, 2);
+            cs.start_round(hash.clone(), 2);
         }
 
         let mut v1 = Vote::new(A1.into(), hash.clone());
