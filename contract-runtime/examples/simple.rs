@@ -1,4 +1,5 @@
-#[no_mangle]
-pub extern "C" fn main() -> i64 {
-    42
+pub extern "C" fn entry() {}
+
+fn main() {
+    entry();
 }

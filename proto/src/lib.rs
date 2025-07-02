@@ -120,6 +120,11 @@ pub struct Vote {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finalized {
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Schedule {
     pub slot: u64,
     pub validator: String,
@@ -193,6 +198,14 @@ mod tests {
         let data = serde_json::to_vec(&vote).unwrap();
         let decoded: Vote = serde_json::from_slice(&data).unwrap();
         assert_eq!(vote, decoded);
+    }
+
+    #[test]
+    fn finalized_roundtrip() {
+        let f = Finalized { hash: "h".into() };
+        let data = serde_json::to_vec(&f).unwrap();
+        let decoded: Finalized = serde_json::from_slice(&data).unwrap();
+        assert_eq!(f, decoded);
     }
 
     #[test]
