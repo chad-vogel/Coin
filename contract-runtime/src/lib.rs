@@ -2,6 +2,13 @@ use coin_proto::Transaction;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
+use std::fs;
+
+const STATE_FILE: &str = "runtime_state.json";
+
+fn state_path() -> String {
+    std::env::var("CONTRACT_STATE_FILE").unwrap_or_else(|_| STATE_FILE.to_string())
+}
 use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 
 pub struct Runtime {
@@ -17,13 +24,29 @@ impl Default for Runtime {
 }
 
 impl Runtime {
+    fn load_state() -> HashMap<String, HashMap<i32, i32>> {
+        let path = state_path();
+        if let Ok(data) = fs::read_to_string(path) {
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            HashMap::new()
+        }
+    }
+
+    fn save_state(&self) {
+        if let Ok(data) = serde_json::to_string(&self.state) {
+            let path = state_path();
+            let _ = fs::write(path, data);
+        }
+    }
+
     pub fn new() -> Self {
         let mut config = Config::default();
         config.consume_fuel(true);
         Self {
             engine: Engine::new(&config),
             modules: HashMap::new(),
-            state: HashMap::new(),
+            state: Self::load_state(),
         }
     }
 
@@ -78,6 +101,7 @@ impl Runtime {
             *gas -= consumed;
         }
         self.state.insert(addr.to_string(), store.data().clone());
+        self.save_state();
         Ok(result)
     }
 }
