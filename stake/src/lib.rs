@@ -50,7 +50,7 @@ impl StakeRegistry {
         let addrs: Vec<String> = self
             .pending_unbonds
             .iter()
-            .filter(|(_, v)| v.1 <= height)
+            .filter(|(_, v)| v.1 < height)
             .map(|(a, _)| a.clone())
             .collect();
         for a in addrs {
@@ -203,7 +203,7 @@ impl ConsensusState {
         self.votes.insert(vote.validator.clone(), stake);
         self.vote_history
             .insert(vote.validator.clone(), vote.block_hash.clone());
-        if self.voted_stake() * 3 > self.registry.total_stake() * 2 {
+        if self.votes.len() > 1 && self.voted_stake() * 3 > self.registry.total_stake() * 2 {
             if let Some(h) = self.current_hash.take() {
                 self.finalized.insert(h);
             }
