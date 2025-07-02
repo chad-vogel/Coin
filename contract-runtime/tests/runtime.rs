@@ -1,5 +1,7 @@
 use coin_proto::Transaction;
 use contract_runtime::Runtime;
+use serial_test::serial;
+use tempfile;
 
 #[test]
 fn deploy_and_invoke() {
@@ -29,6 +31,7 @@ fn tx_helpers() {
 }
 
 #[test]
+#[serial]
 fn state_persistence() {
     let wat = r#"
     (module
@@ -43,6 +46,10 @@ fn state_persistence() {
     )
     "#;
     let wasm = wat::parse_str(wat).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
+    }
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).unwrap();
     let mut gas = 10_000;
@@ -50,8 +57,47 @@ fn state_persistence() {
     assert!(gas < 10_000);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
+    unsafe {
+        std::env::remove_var("CONTRACT_STATE_FILE");
+    }
 }
 
+#[test]
+#[serial]
+fn state_reload_from_disk() {
+    let wat = r#"
+    (module
+        (import "env" "get" (func $get (param i32) (result i32)))
+        (import "env" "set" (func $set (param i32 i32)))
+        (func (export "main") (result i32)
+            (local $v i32)
+            (local.set $v (call $get (i32.const 0)))
+            (call $set (i32.const 0) (i32.add (local.get $v) (i32.const 1)))
+            (call $get (i32.const 0))
+        )
+    )
+    "#;
+    let wasm = wat::parse_str(wat).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
+    }
+    {
+        let mut rt = Runtime::new();
+        rt.deploy("alice", &wasm).unwrap();
+        let mut gas = 10_000;
+        assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
+    }
+    {
+        let mut rt = Runtime::new();
+        rt.deploy("alice", &wasm).unwrap();
+        let mut gas = 10_000;
+        assert_eq!(rt.execute("alice", &mut gas).unwrap(), 2);
+    }
+    unsafe {
+        std::env::remove_var("CONTRACT_STATE_FILE");
+    }
+}
 #[test]
 fn out_of_gas() {
     let wat = "(module (func (export \"main\") (result i32) i32.const 1))";
