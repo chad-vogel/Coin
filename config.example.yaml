@@ -6,7 +6,8 @@ listeners:
 wallet_address: "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr"
 # Node type: Wallet, Miner or Verifier
 node_type: Miner
-# Directory where RocksDB data is stored
+# Directory where RocksDB data is stored. Two subdirectories, `blocks` and
+# `utxos`, hold the chain and UTXO database respectively.
 block_dir: "blocks"
 # List of peers to connect to on startup
 seed_peers:

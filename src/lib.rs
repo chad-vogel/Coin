@@ -993,6 +993,7 @@ mod tests {
         bc.save(dir.path()).unwrap();
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         assert_eq!(db.iterator(rocksdb::IteratorMode::Start).count(), 2);
+        drop(db);
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.all(), bc.all());
     }
@@ -1017,6 +1018,7 @@ mod tests {
         bc.save(dir.path()).unwrap();
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         db.put(999u32.to_be_bytes(), b"junk").unwrap();
+        drop(db);
         bc.save(dir.path()).unwrap();
         let db = rocksdb::DB::open_default(dir.path()).unwrap();
         let count = db.iterator(rocksdb::IteratorMode::Start).count();
@@ -1373,8 +1375,9 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        let db = rocksdb::DB::open_default(dir.path()).unwrap();
+        let db = rocksdb::DB::open_default(dir.path().join("utxos")).unwrap();
         db.delete(b"utxos").unwrap();
+        drop(db);
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(&addr1), bc.balance(&addr1));
         assert_eq!(loaded.balance(&addr2), bc.balance(&addr2));

@@ -36,10 +36,14 @@ fn serialize_error<E: std::fmt::Display>(e: E) -> std::io::Error {
 
 /// Determine the next block index by examining existing keys.
 fn next_index(db: &DB) -> u32 {
-    match db.iterator(IteratorMode::End).next() {
-        Some(Ok((k, _))) => u32::from_be_bytes(k.as_ref().try_into().unwrap()) + 1,
-        _ => 0,
+    for item in db.iterator(IteratorMode::End) {
+        if let Ok((k, _)) = item {
+            if k.len() == 4 {
+                return u32::from_be_bytes(k.as_ref().try_into().unwrap()) + 1;
+            }
+        }
     }
+    0
 }
 
 /// Append `block` to the RocksDB database located at `dir`.
@@ -60,7 +64,10 @@ pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
     let db = open_db(dir)?;
     let mut blocks = Vec::new();
     for item in db.iterator(IteratorMode::Start) {
-        let (_, v) = item.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let (k, v) = item.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        if k.len() != 4 {
+            continue;
+        }
         let block: Block = bincode::deserialize(&v)
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "decode error"))?;
         blocks.push(block);
