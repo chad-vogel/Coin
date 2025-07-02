@@ -177,6 +177,36 @@ async fn test_rpc_error() {
 }
 
 #[tokio::test]
+async fn test_status_rpc_failure() {
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/status")
+        .body(Body::empty())
+        .unwrap();
+    let resp = coin_http::handle_req(req, "127.0.0.1:1".parse().unwrap())
+        .await
+        .unwrap();
+    assert!(resp.status().is_success());
+    let body = hyper::body::to_bytes(resp.into_body()).await.unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["peers"].as_u64().unwrap(), 0);
+    assert_eq!(v["height"].as_u64().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn test_invalid_method() {
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/getBlocks/0/1")
+        .body(Body::empty())
+        .unwrap();
+    let resp = coin_http::handle_req(req, "127.0.0.1:1".parse().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn test_forward_rpc_timeout() {
     use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
     use coin_proto::Handshake;

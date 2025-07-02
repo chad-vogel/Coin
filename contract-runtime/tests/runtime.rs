@@ -119,3 +119,59 @@ fn gas_consumption() {
     assert!(rt.execute("dave", &mut gas).is_ok());
     assert!(gas < 10);
 }
+
+#[test]
+fn simulate_does_not_persist() {
+    let wat = "(module (import \"env\" \"set\" (func $set (param i32 i64))) (func (export \"main\") (result i64) (call $set (i32.const 0) (i64.const 7)) i64.const 0))";
+    let wasm = wat::parse_str(wat).unwrap();
+    let mut rt = Runtime::new();
+    rt.deploy("sim", &wasm).unwrap();
+    let mut gas = 1000;
+    let (_, state) = rt.simulate("sim", &mut gas).unwrap();
+    assert!(matches!(
+        state.get(&0),
+        Some(contract_runtime::Value::I64(7))
+    ));
+    assert!(rt.simulate("sim", &mut gas).is_ok());
+    assert!(rt.execute("sim", &mut gas).unwrap() == 0);
+    assert!(matches!(
+        rt.simulate("sim", &mut gas).unwrap().1.get(&0),
+        Some(contract_runtime::Value::I64(7))
+    ));
+}
+
+#[test]
+fn u256_host_functions() {
+    let wat = r#"
+    (module
+        (import "env" "set_u256" (func $set (param i32 i32 i64)))
+        (import "env" "get_u256" (func $get (param i32 i32) (result i64)))
+        (func (export "main") (result i64)
+            (call $set (i32.const 0) (i32.const 0) (i64.const 5))
+            (call $get (i32.const 0) (i32.const 0))
+        )
+    )
+    "#;
+    let wasm = wat::parse_str(wat).unwrap();
+    let mut rt = Runtime::new();
+    rt.deploy("u256", &wasm).unwrap();
+    let mut gas = 1000;
+    assert_eq!(rt.execute("u256", &mut gas).unwrap(), 5);
+    if let Some(contract_runtime::Value::U256(parts)) =
+        rt.simulate("u256", &mut gas).unwrap().1.get(&0).cloned()
+    {
+        assert_eq!(parts[0], 5);
+    } else {
+        panic!("missing u256 value");
+    }
+}
+
+#[test]
+fn simulate_out_of_gas_error() {
+    let wat = "(module (func (export \"main\") (result i64) i64.const 1))";
+    let wasm = wat::parse_str(wat).unwrap();
+    let mut rt = Runtime::new();
+    rt.deploy("oops", &wasm).unwrap();
+    let mut gas = 0;
+    assert!(rt.simulate("oops", &mut gas).is_err());
+}

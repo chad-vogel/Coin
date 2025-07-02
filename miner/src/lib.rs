@@ -201,4 +201,19 @@ mod tests {
         let hash = hex::decode(block.hash()).unwrap();
         assert!(meets_difficulty(&hash, block.header.difficulty));
     }
+
+    #[test]
+    fn header_bytes_and_hash_bytes() {
+        let header = BlockHeader {
+            previous_hash: "a".into(),
+            merkle_root: "b".into(),
+            timestamp: 1,
+            nonce: 2,
+            difficulty: 3,
+        };
+        let (bytes, pos) = super::header_bytes(&header);
+        assert!(pos > 0 && pos + 8 <= bytes.len());
+        let hash = super::hash_bytes(&bytes);
+        assert_eq!(hash.len(), 32);
+    }
 }

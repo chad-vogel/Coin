@@ -1,7 +1,7 @@
 use coin_proto::Transaction;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 use std::fs;
 
 const STATE_FILE: &str = "runtime_state.json";
@@ -11,10 +11,22 @@ fn state_path() -> String {
 }
 use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Value {
+    I64(i64),
+    U256([u64; 4]),
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::I64(0)
+    }
+}
+
 pub struct Runtime {
     engine: Engine,
     modules: HashMap<String, Module>,
-    state: HashMap<String, HashMap<i32, i64>>,
+    state: HashMap<String, HashMap<i32, Value>>,
 }
 
 impl Default for Runtime {
@@ -24,7 +36,7 @@ impl Default for Runtime {
 }
 
 impl Runtime {
-    fn load_state() -> HashMap<String, HashMap<i32, i64>> {
+    fn load_state() -> HashMap<String, HashMap<i32, Value>> {
         let path = state_path();
         if let Ok(data) = fs::read_to_string(path) {
             serde_json::from_str(&data).unwrap_or_default()
@@ -71,15 +83,58 @@ impl Runtime {
         linker.func_wrap(
             "env",
             "get",
-            |caller: Caller<'_, HashMap<i32, i64>>, key: i32| {
-                *caller.data().get(&key).unwrap_or(&0)
+            |caller: Caller<'_, HashMap<i32, Value>>, key: i32| match caller.data().get(&key) {
+                Some(Value::I64(v)) => *v,
+                _ => 0,
             },
         )?;
         linker.func_wrap(
             "env",
             "set",
-            |mut caller: Caller<'_, HashMap<i32, i64>>, key: i32, val: i64| {
-                caller.data_mut().insert(key, val);
+            |mut caller: Caller<'_, HashMap<i32, Value>>, key: i32, val: i64| {
+                caller.data_mut().insert(key, Value::I64(val));
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "get_u256",
+            |caller: Caller<'_, HashMap<i32, Value>>, key: i32, idx: i32| match caller
+                .data()
+                .get(&key)
+            {
+                Some(Value::U256(arr)) => arr.get(idx as usize).copied().unwrap_or(0) as i64,
+                _ => 0,
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_u256",
+            |mut caller: Caller<'_, HashMap<i32, Value>>, key: i32, idx: i32, val: i64| {
+                let idx = idx as usize;
+                let val_u64 = val as u64;
+                match caller.data_mut().entry(key) {
+                    Entry::Occupied(mut e) => match e.get_mut() {
+                        Value::U256(arr) => {
+                            if idx < 4 {
+                                arr[idx] = val_u64;
+                            }
+                        }
+                        v => {
+                            let mut arr = [0u64; 4];
+                            if idx < 4 {
+                                arr[idx] = val_u64;
+                            }
+                            *v = Value::U256(arr);
+                        }
+                    },
+                    Entry::Vacant(v) => {
+                        let mut arr = [0u64; 4];
+                        if idx < 4 {
+                            arr[idx] = val_u64;
+                        }
+                        v.insert(Value::U256(arr));
+                    }
+                }
             },
         )?;
         let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
@@ -103,6 +158,100 @@ impl Runtime {
         self.state.insert(addr.to_string(), store.data().clone());
         self.save_state();
         Ok(result)
+    }
+
+    pub fn simulate(
+        &self,
+        addr: &str,
+        gas: &mut u64,
+    ) -> anyhow::Result<(i64, HashMap<i32, Value>)> {
+        let module = self
+            .modules
+            .get(addr)
+            .ok_or_else(|| anyhow::anyhow!("module not found"))?;
+
+        let state = self.state.get(addr).cloned().unwrap_or_default();
+        let mut store = Store::new(&self.engine, state);
+        if *gas > 0 {
+            store.add_fuel(*gas).map_err(|e| anyhow::anyhow!(e))?;
+        }
+        let mut linker = Linker::new(&self.engine);
+        linker.func_wrap(
+            "env",
+            "get",
+            |caller: Caller<'_, HashMap<i32, Value>>, key: i32| match caller.data().get(&key) {
+                Some(Value::I64(v)) => *v,
+                _ => 0,
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set",
+            |mut caller: Caller<'_, HashMap<i32, Value>>, key: i32, val: i64| {
+                caller.data_mut().insert(key, Value::I64(val));
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "get_u256",
+            |caller: Caller<'_, HashMap<i32, Value>>, key: i32, idx: i32| match caller
+                .data()
+                .get(&key)
+            {
+                Some(Value::U256(arr)) => arr.get(idx as usize).copied().unwrap_or(0) as i64,
+                _ => 0,
+            },
+        )?;
+        linker.func_wrap(
+            "env",
+            "set_u256",
+            |mut caller: Caller<'_, HashMap<i32, Value>>, key: i32, idx: i32, val: i64| {
+                let idx = idx as usize;
+                let val_u64 = val as u64;
+                match caller.data_mut().entry(key) {
+                    Entry::Occupied(mut e) => match e.get_mut() {
+                        Value::U256(arr) => {
+                            if idx < 4 {
+                                arr[idx] = val_u64;
+                            }
+                        }
+                        v => {
+                            let mut arr = [0u64; 4];
+                            if idx < 4 {
+                                arr[idx] = val_u64;
+                            }
+                            *v = Value::U256(arr);
+                        }
+                    },
+                    Entry::Vacant(v) => {
+                        let mut arr = [0u64; 4];
+                        if idx < 4 {
+                            arr[idx] = val_u64;
+                        }
+                        v.insert(Value::U256(arr));
+                    }
+                }
+            },
+        )?;
+        let instance = linker.instantiate(&mut store, module)?.start(&mut store)?;
+        let func = instance.get_typed_func::<(), i64>(&store, "main")?;
+        let result = match func.call(&mut store, ()) {
+            Ok(res) => res,
+            Err(e) => {
+                if format!("{e}").contains("all fuel consumed") {
+                    return Err(anyhow::anyhow!("gas limit exceeded"));
+                }
+                return Err(anyhow::anyhow!(e));
+            }
+        };
+        if let Some(consumed) = store.fuel_consumed() {
+            if consumed > *gas {
+                *gas = 0;
+                return Err(anyhow::anyhow!("gas limit exceeded"));
+            }
+            *gas -= consumed;
+        }
+        Ok((result, store.data().clone()))
     }
 }
 

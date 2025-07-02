@@ -142,4 +142,13 @@ mod tests {
         assert_eq!(phrase.split_whitespace().count(), 24);
         assert!(wallet.master_xprv_string().starts_with("xprv"));
     }
+
+    #[test]
+    fn address_from_xpub_helper() {
+        let wallet = Wallet::from_seed(&SEED).unwrap();
+        let xpub = wallet.derive_pub("m/0'/0/0").unwrap();
+        let addr1 = wallet.derive_address("m/0'/0/0").unwrap();
+        let addr2 = super::address_from_xpub(&xpub);
+        assert_eq!(addr1, addr2);
+    }
 }
