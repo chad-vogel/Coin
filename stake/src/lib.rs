@@ -5,15 +5,19 @@ use secp256k1::{self, Secp256k1};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
+const UNBOND_DELAY: u64 = 5;
+
 #[derive(Clone, Debug)]
 pub struct StakeRegistry {
     stakes: HashMap<String, u64>,
+    pending_unbonds: HashMap<String, (u64, u64)>,
 }
 
 impl StakeRegistry {
     pub fn new() -> Self {
         Self {
             stakes: HashMap::new(),
+            pending_unbonds: HashMap::new(),
         }
     }
 
@@ -32,13 +36,32 @@ impl StakeRegistry {
         true
     }
 
-    pub fn unstake(&mut self, chain: &mut Blockchain, addr: &str) -> u64 {
+    pub fn unstake(&mut self, addr: &str, height: u64) -> u64 {
         if let Some(v) = self.stakes.remove(addr) {
-            chain.unlock_stake(addr, v);
+            self.pending_unbonds
+                .insert(addr.to_string(), (v, height + UNBOND_DELAY));
             v
         } else {
             0
         }
+    }
+
+    pub fn process_unbonds(&mut self, chain: &mut Blockchain, height: u64) {
+        let addrs: Vec<String> = self
+            .pending_unbonds
+            .iter()
+            .filter(|(_, v)| v.1 <= height)
+            .map(|(a, _)| a.clone())
+            .collect();
+        for a in addrs {
+            if let Some((amt, _)) = self.pending_unbonds.remove(&a) {
+                chain.unlock_stake(&a, amt);
+            }
+        }
+    }
+
+    pub fn slash(&mut self, addr: &str) {
+        let _ = self.stakes.remove(addr);
     }
 
     pub fn validators(&self) -> HashSet<String> {
@@ -139,6 +162,7 @@ pub struct ConsensusState {
     current_hash: Option<String>,
     votes: HashMap<String, u64>,
     finalized: HashSet<String>,
+    vote_history: HashMap<String, String>,
 }
 
 impl ConsensusState {
@@ -148,12 +172,14 @@ impl ConsensusState {
             current_hash: None,
             votes: HashMap::new(),
             finalized: HashSet::new(),
+            vote_history: HashMap::new(),
         }
     }
 
     pub fn start_round(&mut self, block_hash: String) {
         self.current_hash = Some(block_hash);
         self.votes.clear();
+        self.vote_history.clear();
     }
 
     pub fn current_hash(&self) -> Option<String> {
@@ -168,7 +194,15 @@ impl ConsensusState {
         if stake == 0 {
             return false;
         }
+        if let Some(prev) = self.vote_history.get(&vote.validator) {
+            if prev != &vote.block_hash {
+                self.registry.slash(&vote.validator);
+                return false;
+            }
+        }
         self.votes.insert(vote.validator.clone(), stake);
+        self.vote_history
+            .insert(vote.validator.clone(), vote.block_hash.clone());
         if self.voted_stake() * 3 > self.registry.total_stake() * 2 {
             if let Some(h) = self.current_hash.take() {
                 self.finalized.insert(h);
@@ -269,7 +303,8 @@ mod tests {
         assert_eq!(reg.validators().len(), 1);
         assert_eq!(bc.locked_balance(&addr), 10);
         assert_eq!(reg.schedule(0).as_deref(), Some(addr.as_str()));
-        assert_eq!(reg.unstake(&mut bc, &addr), 10);
+        assert_eq!(reg.unstake(&addr, 0), 10);
+        reg.process_unbonds(&mut bc, UNBOND_DELAY + 1);
         assert_eq!(bc.locked_balance(&addr), 0);
     }
 
@@ -362,5 +397,58 @@ mod tests {
         let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
         let addr = address_from_secret(&sk);
         assert!(!reg.stake(&mut bc, &addr, 10));
+    }
+
+    #[test]
+    fn unbonding_delay() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let mut bc = Blockchain::new();
+        bc.add_block(coin::Block {
+            header: coin::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
+        });
+        let mut reg = StakeRegistry::new();
+        assert!(reg.stake(&mut bc, &addr, 10));
+        assert_eq!(reg.unstake(&addr, 0), 10);
+        assert_eq!(bc.locked_balance(&addr), 10);
+        reg.process_unbonds(&mut bc, UNBOND_DELAY);
+        assert_eq!(bc.locked_balance(&addr), 10);
+        reg.process_unbonds(&mut bc, UNBOND_DELAY + 1);
+        assert_eq!(bc.locked_balance(&addr), 0);
+    }
+
+    #[test]
+    fn slash_equivocation() {
+        let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let addr = address_from_secret(&sk);
+        let mut bc = Blockchain::new();
+        bc.add_block(coin::Block {
+            header: coin::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: String::new(),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
+        });
+        let mut reg = StakeRegistry::new();
+        assert!(reg.stake(&mut bc, &addr, 10));
+        let mut cs = ConsensusState::new(reg.clone());
+        cs.start_round("h1".into());
+        let mut v1 = Vote::new(addr.clone(), "h1".into());
+        v1.sign(&sk);
+        assert!(!cs.register_vote(&v1));
+        let mut v2 = Vote::new(addr.clone(), "other".into());
+        v2.sign(&sk);
+        assert!(!cs.register_vote(&v2));
+        assert_eq!(cs.registry_mut().stake_of(&addr), 0);
     }
 }

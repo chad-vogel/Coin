@@ -114,5 +114,6 @@ async fn finalize_block_on_votes() {
     drop(cs);
     let saved = Blockchain::load(dir.path()).unwrap_or_else(|e| panic!("{:?}", e));
     assert_eq!(saved.len(), 2);
+    assert!(saved.is_finalized(&hash));
     node.shutdown();
 }

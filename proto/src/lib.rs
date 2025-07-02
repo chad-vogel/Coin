@@ -126,6 +126,11 @@ pub struct Schedule {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finalize {
+    pub hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stake {
     pub address: String,
     pub amount: u64,
@@ -204,6 +209,14 @@ mod tests {
         let data = serde_json::to_vec(&sched).unwrap();
         let decoded: Schedule = serde_json::from_slice(&data).unwrap();
         assert_eq!(sched, decoded);
+    }
+
+    #[test]
+    fn finalize_roundtrip() {
+        let fin = Finalize { hash: "h".into() };
+        let data = serde_json::to_vec(&fin).unwrap();
+        let decoded: Finalize = serde_json::from_slice(&data).unwrap();
+        assert_eq!(fin, decoded);
     }
 
     #[test]

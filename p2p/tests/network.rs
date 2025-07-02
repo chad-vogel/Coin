@@ -176,6 +176,11 @@ async fn network_votes_finalize_block() {
             let cs = cs.lock().await;
             assert!(cs.is_finalized(&hash));
         }
+        {
+            let chain = node_a.chain_handle();
+            let chain = chain.lock().await;
+            assert!(chain.is_finalized(&hash));
+        }
 
         node_a.shutdown();
         node_b.shutdown();

@@ -536,6 +536,12 @@ impl Node {
                             proxy,
                         )
                         .await;
+                        let height = chain.len() as u64;
+                        consensus
+                            .lock()
+                            .await
+                            .registry_mut()
+                            .process_unbonds(&mut chain, height);
                         consensus.lock().await.start_round(hash);
                     }
                 }
@@ -759,6 +765,12 @@ impl Node {
                                                     if valid_block(&chain, &block) {
                                                         let hash = block.hash();
                                                         chain.add_block(block);
+                                                        let height = chain.len() as u64;
+                                                        consensus
+                                                            .lock()
+                                                            .await
+                                                            .registry_mut()
+                                                            .process_unbonds(&mut chain, height);
                                                         consensus.lock().await.start_round(hash);
                                                     }
                                                 }
@@ -785,6 +797,9 @@ impl Node {
                                                 }
                                             }
                                             RpcMessage::Schedule(_) => {}
+                                            RpcMessage::Finalize(f) => {
+                                                chain.lock().await.finalize_block(&f.hash);
+                                            }
                                             RpcMessage::Stake(_) => {}
                                             RpcMessage::Unstake(_) => {}
                                             RpcMessage::Balance(_) => {}
@@ -949,9 +964,11 @@ impl Node {
         };
         if finalized {
             let mut chain = self.chain.lock().await;
+            chain.finalize_block(&vote.block_hash);
             let _ = chain.save(&block_dir());
             let slot = chain.len() as u64;
             drop(chain);
+            let _ = self.broadcast_finalized(&vote.block_hash).await;
             let _ = self.broadcast_schedule(slot).await;
         }
     }
@@ -968,6 +985,21 @@ impl Node {
             slot,
             validator: validator.unwrap(),
         });
+        let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
+        for addr in list {
+            if let Ok(mut stream) = self.connect_stream(addr).await {
+                let hs = RpcMessage::Handshake(self.build_handshake());
+                if write_msg(&mut stream, &hs).await.is_ok() {
+                    let _ = read_msg(&mut stream).await;
+                    let _ = write_msg(&mut stream, &msg).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn broadcast_finalized(&self, hash: &str) -> tokio::io::Result<()> {
+        let msg = RpcMessage::Finalize(coin_proto::Finalize { hash: hash.into() });
         let list: Vec<SocketAddr> = self.peers.lock().await.iter().copied().collect();
         for addr in list {
             if let Ok(mut stream) = self.connect_stream(addr).await {

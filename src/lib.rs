@@ -5,7 +5,7 @@ use ripemd::Ripemd160;
 use secp256k1;
 use serde_json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -375,6 +375,7 @@ pub struct Blockchain {
     runtime: contract_runtime::Runtime,
     utxos: HashMap<String, u64>,
     locked: HashMap<String, u64>,
+    finalized: HashSet<String>,
 }
 
 impl Blockchain {
@@ -386,6 +387,7 @@ impl Blockchain {
             difficulty: 1,
             utxos: HashMap::new(),
             locked: HashMap::new(),
+            finalized: HashSet::new(),
         }
     }
 
@@ -655,6 +657,10 @@ impl Blockchain {
             blockfile::append_block(dir, block)?;
         }
         utxofile::save_utxos(dir.join("utxos.bin"), &self.utxos)?;
+        let finalized_file = dir.join("finalized.json");
+        let data = serde_json::to_vec(&self.finalized)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        std::fs::write(finalized_file, data)?;
         Ok(())
     }
 
@@ -675,12 +681,18 @@ impl Blockchain {
             ));
         }
         let saved_utxos = utxofile::load_utxos(dir.join("utxos.bin")).ok();
+        let saved_finalized: Option<HashSet<String>> = std::fs::read(dir.join("finalized.json"))
+            .ok()
+            .and_then(|d| serde_json::from_slice(&d).ok());
         let mut bc = Blockchain::new();
         for block in &blocks {
             bc.add_block(block.clone());
         }
         if let Some(map) = saved_utxos {
             bc.utxos = map;
+        }
+        if let Some(set) = saved_finalized {
+            bc.finalized = set;
         }
         Ok(bc)
     }
@@ -748,6 +760,18 @@ impl Blockchain {
 
     pub fn locked_balance(&self, addr: &str) -> u64 {
         *self.locked.get(addr).unwrap_or(&0)
+    }
+
+    pub fn finalize_block(&mut self, hash: &str) {
+        self.finalized.insert(hash.to_string());
+    }
+
+    pub fn is_finalized(&self, hash: &str) -> bool {
+        self.finalized.contains(hash)
+    }
+
+    pub fn finalized_blocks(&self) -> Vec<String> {
+        self.finalized.iter().cloned().collect()
     }
 
     /// Prune transactions from blocks older than `depth` from the tip.
