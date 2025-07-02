@@ -50,13 +50,24 @@ impl Runtime {
         }
     }
 
-    pub fn deploy(&mut self, addr: &str, wasm: &[u8]) -> anyhow::Result<()> {
+    pub fn deploy(&mut self, addr: &str, wasm: &[u8]) -> anyhow::Result<HashMap<i32, i32>> {
         let module = Module::new(&self.engine, wasm)?;
         self.modules.insert(addr.to_string(), module);
-        Ok(())
+        self.state.insert(addr.to_string(), HashMap::new());
+        self.save_state();
+        Ok(HashMap::new())
     }
 
-    pub fn execute(&mut self, addr: &str, gas: &mut u64) -> anyhow::Result<i32> {
+    pub fn set_state(&mut self, addr: &str, state: HashMap<i32, i32>) {
+        self.state.insert(addr.to_string(), state);
+        self.save_state();
+    }
+
+    pub fn execute(
+        &mut self,
+        addr: &str,
+        gas: &mut u64,
+    ) -> anyhow::Result<(i32, HashMap<i32, i32>)> {
         let module = self
             .modules
             .get(addr)
@@ -102,7 +113,7 @@ impl Runtime {
         }
         self.state.insert(addr.to_string(), store.data().clone());
         self.save_state();
-        Ok(result)
+        Ok((result, store.data().clone()))
     }
 }
 
@@ -132,6 +143,7 @@ impl ContractTxExt for Transaction {
             encrypted_message: serde_json::to_vec(&DeployPayload { wasm }).unwrap(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            contract_state: HashMap::new(),
         }
     }
 
@@ -148,6 +160,7 @@ impl ContractTxExt for Transaction {
             .unwrap(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            contract_state: HashMap::new(),
         }
     }
 }

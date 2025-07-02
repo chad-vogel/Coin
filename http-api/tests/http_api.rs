@@ -26,7 +26,7 @@ async fn test_http_endpoints() {
         let handle = node.chain_handle();
         let mut chain = handle.lock().await;
         reward = chain.block_subsidy();
-        chain.add_block(Block {
+        let _ = chain.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
@@ -83,6 +83,7 @@ async fn test_http_endpoints() {
         encrypted_message: vec![],
         inputs: vec![],
         outputs: vec![],
+        contract_state: std::collections::HashMap::new(),
     };
     let resp = client
         .post(&format!("http://{}/sendTransaction", addr))

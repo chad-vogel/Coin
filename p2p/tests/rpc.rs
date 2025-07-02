@@ -54,6 +54,7 @@ fn vote_and_schedule_roundtrip() {
             encrypted_message: vec![],
             inputs: vec![],
             outputs: vec![],
+            contract_state: std::collections::HashMap::new(),
         },
     };
     let detail = RpcMessage::TransactionDetail(tx_detail.clone());

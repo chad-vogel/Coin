@@ -758,7 +758,7 @@ impl Node {
                                                     let mut chain = chain.lock().await;
                                                     if valid_block(&chain, &block) {
                                                         let hash = block.hash();
-                                                        chain.add_block(block);
+                                                        let block = chain.add_block(block);
                                                         consensus.lock().await.start_round(hash);
                                                     }
                                                 }
@@ -1063,7 +1063,7 @@ mod tests {
         {
             let mut chain = node.chain.lock().await;
             let reward = chain.block_subsidy();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1087,6 +1087,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         send_transaction(&addr.to_string(), &tx).await.unwrap();
@@ -1185,7 +1186,7 @@ mod tests {
         let addr_a = addrs_a[0];
         {
             let mut chain = node_a.chain.lock().await;
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1213,7 +1214,7 @@ mod tests {
         );
         {
             let mut chain = node_b.chain.lock().await;
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1224,7 +1225,7 @@ mod tests {
                 transactions: vec![],
             });
             let prev = chain.last_block_hash().unwrap();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: prev,
                     merkle_root: String::new(),
@@ -1267,7 +1268,7 @@ mod tests {
         let addr_a = addrs_a[0];
         {
             let mut chain = node_a.chain.lock().await;
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1284,6 +1285,7 @@ mod tests {
                     encrypted_message: Vec::new(),
                     inputs: vec![],
                     outputs: vec![],
+                    contract_state: HashMap::new(),
                 }],
             });
         }
@@ -1349,6 +1351,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let block = coin_proto::Block {
@@ -1407,6 +1410,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1476,6 +1480,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/0", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1493,7 +1498,7 @@ mod tests {
             },
             transactions: vec![tx],
         };
-        node_a.chain.lock().await.add_block(block.clone());
+        let block = node_a.chain.lock().await.add_block(block.clone());
         node_a.broadcast_block(&block).await.unwrap();
 
         sleep(Duration::from_millis(200)).await;
@@ -1515,6 +1520,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/0", &mut tx0);
         chain.add_transaction(tx0);
@@ -1530,6 +1536,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1565,6 +1572,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1612,6 +1620,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         sign_for("m/0'/0/1", &mut tx);
         let merkle = compute_merkle_root(&[tx.clone()]);
@@ -1669,7 +1678,7 @@ mod tests {
         {
             let mut chain = node.chain.lock().await;
             let reward = chain.block_subsidy();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1688,6 +1697,7 @@ mod tests {
                 encrypted_message: Vec::new(),
                 inputs: vec![],
                 outputs: vec![],
+                contract_state: HashMap::new(),
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
@@ -1716,7 +1726,7 @@ mod tests {
         {
             let mut chain = miner.chain.lock().await;
             let reward = chain.block_subsidy();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -1735,6 +1745,7 @@ mod tests {
                 encrypted_message: Vec::new(),
                 inputs: vec![],
                 outputs: vec![],
+                contract_state: HashMap::new(),
             };
             sign_for("m/0'/0/0", &mut tx);
             chain.add_transaction(tx);
@@ -2051,7 +2062,7 @@ mod tests {
                 transactions: vec![coinbase_transaction(A1, reward)],
             };
             let hash = block.hash();
-            chain.add_block(block.clone());
+            let block = chain.add_block(block.clone());
             (block, hash)
         };
 
@@ -2099,7 +2110,7 @@ mod tests {
         {
             let mut chain = node.chain.lock().await;
             let reward = chain.block_subsidy();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -2293,7 +2304,7 @@ mod tests {
         let reward = {
             let mut chain = node.chain.lock().await;
             let reward = chain.block_subsidy();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),
@@ -2350,7 +2361,7 @@ mod tests {
             let reward = chain.block_subsidy();
             for _ in 0..3 {
                 let prev = chain.last_block_hash().unwrap_or_default();
-                chain.add_block(Block {
+                let _ = chain.add_block(Block {
                     header: BlockHeader {
                         previous_hash: prev,
                         merkle_root: String::new(),
@@ -2407,7 +2418,7 @@ mod tests {
             let reward = chain.block_subsidy();
             let tx = coinbase_transaction(A1, reward);
             let hash = tx.hash();
-            chain.add_block(Block {
+            let _ = chain.add_block(Block {
                 header: BlockHeader {
                     previous_hash: String::new(),
                     merkle_root: String::new(),

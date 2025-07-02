@@ -11,7 +11,7 @@ fn deploy_and_invoke() {
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).expect("deploy");
     let mut gas = 1_000;
-    let result = rt.execute("alice", &mut gas).expect("execute");
+    let (result, _) = rt.execute("alice", &mut gas).expect("execute");
     assert_eq!(result, 42);
     assert!(gas < 1_000);
 }
@@ -53,10 +53,10 @@ fn state_persistence() {
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).unwrap();
     let mut gas = 10_000;
-    assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
+    assert_eq!(rt.execute("alice", &mut gas).unwrap().0, 1);
     assert!(gas < 10_000);
     let mut gas2 = 10_000;
-    assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
+    assert_eq!(rt.execute("alice", &mut gas2).unwrap().0, 2);
     unsafe {
         std::env::remove_var("CONTRACT_STATE_FILE");
     }
@@ -86,13 +86,13 @@ fn state_reload_from_disk() {
         let mut rt = Runtime::new();
         rt.deploy("alice", &wasm).unwrap();
         let mut gas = 10_000;
-        assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
+        assert_eq!(rt.execute("alice", &mut gas).unwrap().0, 1);
     }
     {
         let mut rt = Runtime::new();
         rt.deploy("alice", &wasm).unwrap();
         let mut gas = 10_000;
-        assert_eq!(rt.execute("alice", &mut gas).unwrap(), 2);
+        assert_eq!(rt.execute("alice", &mut gas).unwrap().0, 2);
     }
     unsafe {
         std::env::remove_var("CONTRACT_STATE_FILE");

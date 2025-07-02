@@ -79,6 +79,7 @@ pub fn new_transaction_with_fee(
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: Vec::new(),
+        contract_state: HashMap::new(),
     }
 }
 
@@ -120,6 +121,7 @@ pub fn new_multi_transaction_with_fee(
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: extra,
+        contract_state: HashMap::new(),
     }
 }
 
@@ -136,6 +138,7 @@ pub fn coinbase_transaction(miner: impl Into<String>, amount: u64) -> Transactio
         encrypted_message: Vec::new(),
         inputs: Vec::new(),
         outputs: Vec::new(),
+        contract_state: HashMap::new(),
     }
 }
 
@@ -186,6 +189,7 @@ pub fn new_transaction_with_message(
         encrypted_message: encrypt_message(message, sender_sk, recipient_pk),
         inputs: Vec::new(),
         outputs: Vec::new(),
+        contract_state: HashMap::new(),
     }
 }
 
@@ -474,8 +478,8 @@ impl Blockchain {
     }
 
     /// Append a confirmed block to the chain and clear contained transactions
-    pub fn add_block(&mut self, block: Block) {
-        for tx in &block.transactions {
+    pub fn add_block(&mut self, mut block: Block) -> Block {
+        for tx in &mut block.transactions {
             if let Some(pos) = self.mempool.iter().position(|m| m == tx) {
                 self.mempool.remove(pos);
             }
@@ -505,16 +509,35 @@ impl Blockchain {
                 if let Ok(dep) =
                     serde_json::from_slice::<contract_runtime::DeployPayload>(&tx.encrypted_message)
                 {
-                    let _ = self.runtime.deploy(&tx.sender, &dep.wasm);
+                    if tx.contract_state.is_empty() {
+                        let state = self
+                            .runtime
+                            .deploy(&tx.sender, &dep.wasm)
+                            .unwrap_or_default();
+                        tx.contract_state = state;
+                    } else {
+                        self.runtime
+                            .set_state(&tx.sender, tx.contract_state.clone());
+                    }
                 } else if let Ok(inv) =
                     serde_json::from_slice::<contract_runtime::InvokePayload>(&tx.encrypted_message)
                 {
-                    let mut gas = 1_000_000;
-                    let _ = self.runtime.execute(&inv.contract, &mut gas);
+                    if tx.contract_state.is_empty() {
+                        let mut gas = 1_000_000;
+                        let (_res, state) = self
+                            .runtime
+                            .execute(&inv.contract, &mut gas)
+                            .unwrap_or((0, HashMap::new()));
+                        tx.contract_state = state;
+                    } else {
+                        self.runtime
+                            .set_state(&inv.contract, tx.contract_state.clone());
+                    }
                 }
             }
         }
-        self.chain.push(block);
+        block.header.merkle_root = compute_merkle_root(&block.transactions);
+        self.chain.push(block.clone());
 
         if self.chain.len() >= DIFFICULTY_WINDOW {
             let window = &self.chain[self.chain.len() - DIFFICULTY_WINDOW..];
@@ -533,6 +556,7 @@ impl Blockchain {
                 }
             }
         }
+        block
     }
 
     pub fn last_block_hash(&self) -> Option<String> {
@@ -664,7 +688,7 @@ impl Blockchain {
         let saved_utxos = utxofile::load_utxos(dir.join("utxos.bin")).ok();
         let mut bc = Blockchain::new();
         for block in &blocks {
-            bc.add_block(block.clone());
+            let _ = bc.add_block(block.clone());
         }
         if let Some(map) = saved_utxos {
             bc.utxos = map;
@@ -775,7 +799,7 @@ mod tests {
         let addr1 = address_from_secret(&sk1);
         let addr2 = address_from_secret(&sk2);
         // fund both accounts
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
@@ -797,7 +821,7 @@ mod tests {
         // Candidate block should contain both transactions
         let block = bc.candidate_block();
         assert_eq!(block.transactions.len(), 2);
-        bc.add_block(block.clone());
+        let _ = bc.add_block(block.clone());
         assert_eq!(bc.len(), 2);
         // mempool cleared
         assert!(bc.mempool.is_empty());
@@ -820,7 +844,7 @@ mod tests {
                 },
                 transactions: vec![],
             };
-            bc.add_block(block);
+            let _ = bc.add_block(block);
         }
         let diff_after_fast = bc.difficulty();
         assert!(diff_after_fast > 1);
@@ -838,7 +862,7 @@ mod tests {
                 },
                 transactions: vec![],
             };
-            bc.add_block(block);
+            let _ = bc.add_block(block);
         }
         let diff_after_slow = bc.difficulty();
         assert!(diff_after_slow < diff_after_fast);
@@ -860,7 +884,7 @@ mod tests {
             },
             transactions: vec![tx],
         };
-        bc.add_block(block);
+        let _ = bc.add_block(block);
         assert_eq!(bc.balance(A1), bc.block_subsidy() as i64);
     }
 
@@ -876,6 +900,7 @@ mod tests {
             encrypted_message: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
+            contract_state: HashMap::new(),
         };
         assert!(!bc.add_transaction(tx));
         assert_eq!(bc.mempool_len(), 0);
@@ -903,7 +928,7 @@ mod tests {
         let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let addr = address_from_secret(&sk);
         // give sender some coins
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
@@ -925,7 +950,7 @@ mod tests {
         let addr1 = address_from_secret(&sk1);
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let addr2 = address_from_secret(&sk2);
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: compute_merkle_root(&[coinbase_transaction(
@@ -942,7 +967,7 @@ mod tests {
         tx.sign(&sk1);
         assert!(bc.add_transaction(tx.clone()));
         let block = bc.candidate_block();
-        bc.add_block(block);
+        let _ = bc.add_block(block);
         assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 7);
         assert_eq!(bc.balance(&addr2), 5);
     }
@@ -961,7 +986,7 @@ mod tests {
             },
             transactions: vec![tx],
         };
-        bc.add_block(block);
+        let _ = bc.add_block(block);
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
         let loaded = Blockchain::load(dir.path()).unwrap();
@@ -974,7 +999,7 @@ mod tests {
         let mut bc = Blockchain::new();
         for i in 0..2 {
             let tx = coinbase_transaction(A1, bc.block_subsidy());
-            bc.add_block(Block {
+            let _ = bc.add_block(Block {
                 header: BlockHeader {
                     previous_hash: bc.last_block_hash().unwrap_or_default(),
                     merkle_root: compute_merkle_root(&[tx.clone()]),
@@ -1047,6 +1072,7 @@ mod tests {
                 encrypted_message: Vec::new(),
                 inputs: vec![],
                 outputs: vec![],
+                contract_state: HashMap::new(),
             }],
         };
         blockfile::append_block(dir.path(), &block).unwrap();
@@ -1339,7 +1365,7 @@ mod tests {
         assert_eq!(bc.available_utxo(&addr1), bc.block_subsidy() as i64 - 6);
         assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64);
         let block = bc.candidate_block();
-        bc.add_block(block);
+        let _ = bc.add_block(block);
         assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 6);
     }
 
@@ -1574,7 +1600,7 @@ mod tests {
         tx.sign(&sk1);
         assert!(bc.add_transaction(tx.clone()));
         let block = bc.candidate_block();
-        bc.add_block(block);
+        let _ = bc.add_block(block);
         assert_eq!(bc.balance(&addr1), bc.block_subsidy() as i64 - 10);
         assert_eq!(bc.balance(&addr2), 10);
     }

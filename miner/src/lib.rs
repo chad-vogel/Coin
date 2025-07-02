@@ -48,7 +48,7 @@ pub fn mine_block(chain: &mut Blockchain, miner: &str) -> Block {
         }
         block.header.nonce += 1;
     }
-    chain.add_block(block.clone());
+    let block = chain.add_block(block.clone());
     block
 }
 
@@ -98,7 +98,7 @@ pub fn mine_block_threads(chain: &mut Blockchain, miner: &str, threads: usize) -
     }
 
     let block = result.lock().unwrap().take().unwrap();
-    chain.add_block(block.clone());
+    let block = chain.add_block(block.clone());
     block
 }
 
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn mining_adds_block() {
         let mut bc = Blockchain::new();
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
@@ -163,7 +163,7 @@ mod tests {
     fn miner_collects_fees() {
         let mut bc = Blockchain::new();
         let reward1 = bc.block_subsidy();
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn multithreaded_mining() {
         let mut bc = Blockchain::new();
-        bc.add_block(Block {
+        let _ = bc.add_block(Block {
             header: BlockHeader {
                 previous_hash: String::new(),
                 merkle_root: String::new(),

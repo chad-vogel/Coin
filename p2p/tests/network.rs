@@ -4,7 +4,9 @@ use coin_p2p::{
     rpc::{RpcMessage, read_rpc, write_rpc},
     sign_handshake,
 };
+use coin_proto::Transaction;
 use coin_wallet::Wallet;
+use contract_runtime::ContractTxExt;
 use hex_literal::hex;
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -245,4 +247,76 @@ async fn peer_limit_and_rate_limit() {
     node.shutdown();
     drop(peer2);
     drop(peer3);
+}
+
+#[tokio::test]
+async fn contract_state_sync() {
+    let node_a = Node::with_interval(
+        vec!["127.0.0.1:0".parse().unwrap()],
+        Duration::from_millis(50),
+        NodeType::Verifier,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (addrs_a, _) = node_a.start().await.unwrap();
+    let addr_a = addrs_a[0];
+    let wasm = wat::parse_str(
+        "(module (import \"env\" \"get\" (func $get (param i32) (result i32)))\n        (import \"env\" \"set\" (func $set (param i32 i32)))\n        (func (export \"main\") (result i32)\n            (local $v i32)\n            (local.set $v (call $get (i32.const 0)))\n            (call $set (i32.const 0) (i32.add (local.get $v) (i32.const 1)))\n            (call $get (i32.const 0))\n        ))"
+    ).unwrap();
+    {
+        let handle = node_a.chain_handle();
+        let mut chain = handle.lock().await;
+        let tx: Transaction = contract_runtime::ContractTxExt::deploy_tx(A1, wasm.clone());
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        };
+        let _ = chain.add_block(block);
+        let inv: Transaction = contract_runtime::ContractTxExt::invoke_tx(A2, A1);
+        let block2 = Block {
+            header: BlockHeader {
+                previous_hash: chain.last_block_hash().unwrap(),
+                merkle_root: compute_merkle_root(&[inv.clone()]),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![inv],
+        };
+        let _ = chain.add_block(block2);
+    }
+
+    let node_b = Node::with_interval(
+        vec!["127.0.0.1:0".parse().unwrap()],
+        Duration::from_millis(50),
+        NodeType::Verifier,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    );
+    let (_addrs_b, _) = node_b.start().await.unwrap();
+    node_b.sync_from_peer(addr_a).await.unwrap();
+    assert_eq!(node_b.chain_len().await, 2);
+    let chain = node_b.chain_handle();
+    let chain = chain.lock().await;
+    assert!(chain.all()[1].transactions[0].contract_state.get(&0) == Some(&1));
 }

@@ -27,3 +27,5 @@ coin-wallet = { path = "../wallet" }
 hex-literal = "0.4"
 tempfile = "3"
 proptest = "1"
+contract-runtime = { path = "../contract-runtime" }
+wat = "1"

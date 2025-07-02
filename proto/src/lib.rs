@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
@@ -12,6 +13,8 @@ pub struct Transaction {
     pub inputs: Vec<TransactionInput>,
     #[serde(default)]
     pub outputs: Vec<TransactionOutput>,
+    #[serde(default)]
+    pub contract_state: HashMap<i32, i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -151,6 +154,7 @@ mod tests {
             encrypted_message: vec![],
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         let data = serde_json::to_vec(&tx).unwrap();
         let decoded: Transaction = serde_json::from_slice(&data).unwrap();
@@ -176,6 +180,7 @@ mod tests {
                 encrypted_message: vec![],
                 inputs: vec![],
                 outputs: vec![],
+                contract_state: HashMap::new(),
             }],
         };
         let data = serde_json::to_vec(&block).unwrap();
@@ -241,6 +246,7 @@ mod tests {
             encrypted_message: vec![],
             inputs: vec![],
             outputs: vec![],
+            contract_state: HashMap::new(),
         };
         let detail = TransactionDetail {
             transaction: tx.clone(),
