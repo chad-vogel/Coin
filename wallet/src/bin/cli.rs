@@ -9,7 +9,9 @@ mod real_cli {
     use clap::{Parser, Subcommand};
     use coin::{Blockchain, TransactionExt, new_transaction_with_fee};
     use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
-    use coin_proto::{Chain, GetChain, Handshake, Transaction};
+    use coin_proto::{
+        Chain, GetChain, Handshake, Stake as RpcStake, Transaction, Unstake as RpcUnstake,
+    };
     use coin_wallet::Wallet;
     use hex;
     use pbkdf2::pbkdf2_hmac;
@@ -52,6 +54,19 @@ mod real_cli {
             amount: u64,
             #[arg(long, default_value = "0")]
             fee: u64,
+            path: String,
+            #[arg(long, default_value = "127.0.0.1:9000")]
+            node: String,
+        },
+        /// Stake coins for validator selection
+        Stake {
+            amount: u64,
+            path: String,
+            #[arg(long, default_value = "127.0.0.1:9000")]
+            node: String,
+        },
+        /// Withdraw staked coins
+        Unstake {
             path: String,
             #[arg(long, default_value = "127.0.0.1:9000")]
             node: String,
@@ -200,6 +215,20 @@ mod real_cli {
         Ok(())
     }
 
+    async fn send_stake(addr: &str, address: String, amount: u64) -> Result<()> {
+        let mut stream = rpc_connect(addr).await?;
+        let msg = RpcMessage::Stake(RpcStake { address, amount });
+        write_msg(&mut stream, &msg).await?;
+        Ok(())
+    }
+
+    async fn send_unstake(addr: &str, address: String) -> Result<()> {
+        let mut stream = rpc_connect(addr).await?;
+        let msg = RpcMessage::Unstake(RpcUnstake { address });
+        write_msg(&mut stream, &msg).await?;
+        Ok(())
+    }
+
     #[cfg(not(tarpaulin))]
     pub async fn run() -> Result<()> {
         let cli = Cli::parse();
@@ -263,6 +292,22 @@ mod real_cli {
                 tx.sign(child.secret_key());
                 send_transaction(&node, &tx).await?;
                 println!("Transaction sent");
+            }
+            Commands::Stake { amount, path, node } => {
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
+                let addr = wallet
+                    .derive_address(&path)
+                    .map_err(|e| anyhow!("{:?}", e))?;
+                send_stake(&node, addr, amount).await?;
+                println!("Stake submitted");
+            }
+            Commands::Unstake { path, node } => {
+                let wallet = load_wallet(&cli.wallet, cli.password.as_deref())?;
+                let addr = wallet
+                    .derive_address(&path)
+                    .map_err(|e| anyhow!("{:?}", e))?;
+                send_unstake(&node, addr).await?;
+                println!("Unstake submitted");
             }
         }
         Ok(())
