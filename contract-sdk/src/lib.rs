@@ -45,18 +45,93 @@ extern "C" {
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(dead_code)]
 mod host_funcs {
-    pub unsafe fn get(_key: i32) -> i64 {
-        0
+    #[cfg(test)]
+    use once_cell::sync::Lazy;
+    #[cfg(test)]
+    use std::collections::HashMap;
+    #[cfg(test)]
+    use std::sync::Mutex;
+
+    #[cfg(test)]
+    static STORE: Lazy<Mutex<HashMap<i32, i64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+    #[allow(unused_variables)]
+    pub unsafe fn get(key: i32) -> i64 {
+        #[cfg(test)]
+        {
+            let store = STORE.lock().unwrap();
+            *store.get(&key).unwrap_or(&0)
+        }
+        #[cfg(not(test))]
+        {
+            0
+        }
     }
-    pub unsafe fn set(_key: i32, _value: i64) {}
-    pub unsafe fn get_u128(_base: i32) -> (i64, i64) {
-        (0, 0)
+
+    #[allow(unused_variables)]
+    pub unsafe fn set(key: i32, value: i64) {
+        #[cfg(test)]
+        {
+            let mut store = STORE.lock().unwrap();
+            store.insert(key, value);
+        }
     }
-    pub unsafe fn set_u128(_base: i32, _lo: i64, _hi: i64) {}
-    pub unsafe fn get_u256(_base: i32) -> (i64, i64, i64, i64) {
-        (0, 0, 0, 0)
+
+    #[allow(unused_variables)]
+    pub unsafe fn get_u128(base: i32) -> (i64, i64) {
+        #[cfg(test)]
+        {
+            let store = STORE.lock().unwrap();
+            (
+                *store.get(&base).unwrap_or(&0),
+                *store.get(&(base + 1)).unwrap_or(&0),
+            )
+        }
+        #[cfg(not(test))]
+        {
+            (0, 0)
+        }
     }
-    pub unsafe fn set_u256(_base: i32, _a: i64, _b: i64, _c: i64, _d: i64) {}
+
+    #[allow(unused_variables)]
+    pub unsafe fn set_u128(base: i32, lo: i64, hi: i64) {
+        #[cfg(test)]
+        {
+            let mut store = STORE.lock().unwrap();
+            store.insert(base, lo);
+            store.insert(base + 1, hi);
+        }
+    }
+
+    #[allow(unused_variables)]
+    pub unsafe fn get_u256(base: i32) -> (i64, i64, i64, i64) {
+        #[cfg(test)]
+        {
+            let store = STORE.lock().unwrap();
+            (
+                *store.get(&base).unwrap_or(&0),
+                *store.get(&(base + 1)).unwrap_or(&0),
+                *store.get(&(base + 2)).unwrap_or(&0),
+                *store.get(&(base + 3)).unwrap_or(&0),
+            )
+        }
+        #[cfg(not(test))]
+        {
+            (0, 0, 0, 0)
+        }
+    }
+
+    #[allow(unused_variables)]
+    pub unsafe fn set_u256(base: i32, a: i64, b: i64, c: i64, d: i64) {
+        #[cfg(test)]
+        {
+            let mut store = STORE.lock().unwrap();
+            store.insert(base, a);
+            store.insert(base + 1, b);
+            store.insert(base + 2, c);
+            store.insert(base + 3, d);
+        }
+    }
 }
 
 pub unsafe fn read_i64(key: i32) -> i64 {
@@ -159,5 +234,21 @@ mod tests {
         v.sub_one();
         assert_eq!(v.hi, 0);
         assert_eq!(v.lo, u128::MAX);
+    }
+
+    #[test]
+    fn read_write_roundtrip() {
+        unsafe {
+            write_i64(1, 42);
+            assert_eq!(read_i64(1), 42);
+            let val128 = 12345678901234567890u128;
+            write_u128(2, val128);
+            assert_eq!(read_u128(2), val128);
+            let val256 = Uint256 { hi: 5, lo: 6 };
+            write_u256(10, &val256);
+            let got = read_u256(10);
+            assert_eq!(got.hi, 5);
+            assert_eq!(got.lo, 6);
+        }
     }
 }

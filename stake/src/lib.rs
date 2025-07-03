@@ -485,4 +485,19 @@ mod tests {
         let addr = address_from_secret(&sk);
         assert!(!reg.stake(&mut bc, &addr, 10));
     }
+
+    #[test]
+    fn save_and_load_finalized() {
+        let mut reg = StakeRegistry::new();
+        let mut cs = ConsensusState::new(reg.clone());
+        cs.mark_finalized("h1");
+        cs.mark_finalized("h2");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("finalized.bin");
+        cs.save_finalized(&path).unwrap();
+        let mut cs2 = ConsensusState::new(reg);
+        cs2.load_finalized(&path);
+        assert!(cs2.is_finalized("h1"));
+        assert!(cs2.is_finalized("h2"));
+    }
 }
