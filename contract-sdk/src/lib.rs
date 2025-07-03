@@ -251,4 +251,21 @@ mod tests {
             assert_eq!(got.lo, 6);
         }
     }
+
+    #[test]
+    fn zero_constant_and_large_values() {
+        let zero = Uint256::zero();
+        assert_eq!(zero.hi, 0);
+        assert_eq!(zero.lo, 0);
+        let mut big = Uint256 {
+            hi: u128::MAX,
+            lo: u128::MAX,
+        };
+        big.add_one();
+        assert_eq!(big.hi, u128::MAX);
+        assert_eq!(big.lo, 0);
+        big.sub_one();
+        assert_eq!(big.hi, u128::MAX);
+        assert_eq!(big.lo, u128::MAX);
+    }
 }

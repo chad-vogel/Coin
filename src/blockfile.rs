@@ -137,6 +137,8 @@ pub fn migrate_from_files(dir: &Path) -> std::io::Result<Vec<Block>> {
 mod tests {
     use super::*;
     use crate::{Blockchain, coinbase_transaction};
+    use std::fs::File;
+    use std::io::Write;
     use tempfile::tempdir;
 
     #[test]
@@ -192,6 +194,51 @@ mod tests {
         db.put(b"next_index", &1u32.to_le_bytes()).unwrap();
         db.put("block:0000000000", b"bad").unwrap();
         let res = read_blocks(dir.path());
+        assert!(res.is_err());
+    }
+
+    fn write_legacy(dir: &std::path::Path, index: u32, block: &Block) {
+        let path = dir.join(format!("blk{:05}.dat", index));
+        let mut file = File::create(path).unwrap();
+        let data = bincode::serialize(block).unwrap();
+        file.write_all(&MAGIC_BYTES).unwrap();
+        file.write_all(&(data.len() as u32).to_le_bytes()).unwrap();
+        file.write_all(&data).unwrap();
+    }
+
+    #[test]
+    fn migrate_from_files_roundtrip() {
+        let dir = tempdir().unwrap();
+        let mut bc = Blockchain::new();
+        let tx =
+            coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy()).unwrap();
+        bc.add_block(Block {
+            header: crate::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: crate::compute_merkle_root(&[tx.clone()]),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        });
+        for (i, block) in bc.all().iter().enumerate() {
+            write_legacy(dir.path(), i as u32, block);
+        }
+        let loaded = migrate_from_files(dir.path()).unwrap();
+        assert_eq!(loaded, bc.all());
+        let reread = read_blocks(dir.path()).unwrap();
+        assert_eq!(reread, bc.all());
+    }
+
+    #[test]
+    fn read_blocks_files_bad_magic() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("blk00000.dat");
+        let mut file = File::create(&path).unwrap();
+        file.write_all(b"BADS").unwrap();
+        file.write_all(&0u32.to_le_bytes()).unwrap();
+        let res = read_blocks_files(dir.path());
         assert!(res.is_err());
     }
 }
