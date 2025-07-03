@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use rocksdb::{DB, Options};
@@ -21,7 +21,8 @@ fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
 
-fn db_exists(path: &Path) -> bool {
+/// Return `true` if a RocksDB database exists at `path`.
+pub fn db_exists(path: &Path) -> bool {
     path.join("CURRENT").exists()
 }
 
