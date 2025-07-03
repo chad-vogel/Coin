@@ -19,7 +19,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration as StdDuration, SystemTime, SystemTimeError, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
 use tokio::sync::{Mutex, mpsc};
@@ -140,12 +140,20 @@ pub enum NodeType {
 }
 
 fn valid_block(chain: &Blockchain, block: &Block) -> bool {
+    valid_block_with_time(chain, block, || {
+        SystemTime::now().duration_since(UNIX_EPOCH)
+    })
+}
+
+fn valid_block_with_time<F>(chain: &Blockchain, block: &Block, now_fn: F) -> bool
+where
+    F: Fn() -> Result<StdDuration, SystemTimeError>,
+{
     if block.header.previous_hash != chain.last_block_hash().unwrap_or_default() {
         return false;
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
+    let now = now_fn()
+        .unwrap_or_else(|_| StdDuration::from_secs(0))
         .as_millis() as i64;
     let ts = block.header.timestamp as i64;
     if (ts - now).abs() > MAX_TIME_DRIFT_MS {
@@ -1659,6 +1667,41 @@ mod tests {
             transactions: vec![tx.clone()],
         };
         assert!(!valid_block(&chain, &block));
+    }
+
+    #[tokio::test]
+    async fn valid_block_handles_time_error() {
+        let mut chain = Blockchain::new();
+        chain.add_block(chain.candidate_block());
+
+        let mut tx = Transaction {
+            sender: A2.into(),
+            recipient: A1.into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        sign_for("m/0'/0/1", &mut tx);
+        let merkle = compute_merkle_root(&[tx.clone()]);
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: chain.last_block_hash().unwrap(),
+                merkle_root: merkle,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx.clone()],
+        };
+
+        let time_err = || UNIX_EPOCH.duration_since(SystemTime::now());
+        assert!(!valid_block_with_time(&chain, &block, time_err));
     }
 
     #[tokio::test]
