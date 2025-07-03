@@ -643,6 +643,12 @@ impl Blockchain {
         fs::create_dir_all(dir)?;
         if blockfile::db_exists(dir) {
             let _ = rocksdb::DB::destroy(&Options::default(), dir);
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                if entry.file_type()?.is_file() {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
         } else {
             // cleanup any legacy files
             for entry in fs::read_dir(dir)? {
@@ -781,6 +787,7 @@ impl Blockchain {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use rocksdb::{DB, Options};
     use std::collections::HashMap;
 
     const A1: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
@@ -1393,7 +1400,10 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        std::fs::remove_file(dir.path().join("utxos.bin")).unwrap();
+        let opts = rocksdb::Options::default();
+        let db = rocksdb::DB::open(&opts, dir.path()).unwrap();
+        db.delete(b"utxos").unwrap();
+        drop(db);
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(&addr1), bc.balance(&addr1));
         assert_eq!(loaded.balance(&addr2), bc.balance(&addr2));
@@ -1415,9 +1425,7 @@ mod tests {
         });
         let dir = tempfile::tempdir().unwrap();
         bc.save(dir.path()).unwrap();
-        let path = dir.path().join("utxos.bin");
-        assert!(path.exists());
-        let stored = utxofile::load_utxos(&path).unwrap();
+        let stored = utxofile::load_utxos(dir.path()).unwrap();
         assert_eq!(stored, bc.utxos);
     }
 
@@ -1439,7 +1447,7 @@ mod tests {
         bc.save(dir.path()).unwrap();
         let mut map = HashMap::new();
         map.insert(A1.to_string(), 123);
-        utxofile::save_utxos(dir.path().join("utxos.bin"), &map).unwrap();
+        utxofile::save_utxos(dir.path(), &map).unwrap();
         let loaded = Blockchain::load(dir.path()).unwrap();
         assert_eq!(loaded.balance(A1), 123);
     }

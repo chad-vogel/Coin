@@ -14,3 +14,22 @@ serde_json = "1"
 wat = "1"
 tempfile = "3"
 serial_test = "2"
+
+[features]
+default = []
+wasm = []
+
+[[example]]
+name = "counter"
+path = "examples/counter.rs"
+required-features = ["wasm"]
+
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+required-features = ["wasm"]
+
+[[example]]
+name = "token"
+path = "examples/token.rs"
+required-features = ["wasm"]
