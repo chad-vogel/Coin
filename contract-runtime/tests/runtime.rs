@@ -47,9 +47,7 @@ fn state_persistence() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     let mut rt = Runtime::new();
     rt.deploy("alice", &wasm).unwrap();
     let mut gas = 10_000;
@@ -57,9 +55,7 @@ fn state_persistence() {
     assert!(gas < 10_000);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }
 
 #[test]
@@ -79,9 +75,7 @@ fn state_reload_from_disk() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     {
         let mut rt = Runtime::new();
         rt.deploy("alice", &wasm).unwrap();
@@ -94,9 +88,7 @@ fn state_reload_from_disk() {
         let mut gas = 10_000;
         assert_eq!(rt.execute("alice", &mut gas).unwrap(), 2);
     }
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }
 #[test]
 fn out_of_gas() {
@@ -137,18 +129,14 @@ fn bool_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     let mut rt = Runtime::new();
     rt.deploy("bob", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("bob", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("bob", &mut gas2).unwrap(), 0);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }
 
 #[test]
@@ -177,18 +165,14 @@ fn u128_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     let mut rt = Runtime::new();
     rt.deploy("eve", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("eve", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("eve", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }
 
 #[test]
@@ -223,18 +207,14 @@ fn u256_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     let mut rt = Runtime::new();
     rt.deploy("frank", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("frank", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("frank", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }
 
 #[test]
@@ -269,16 +249,12 @@ fn address_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
+    std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
     let mut rt = Runtime::new();
     rt.deploy("gina", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("gina", &mut gas).unwrap(), 11);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("gina", &mut gas2).unwrap(), 55);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
+    std::env::remove_var("CONTRACT_STATE_FILE");
 }

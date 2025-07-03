@@ -8,9 +8,7 @@ const MINER: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
 #[tokio::test]
 async fn reloads_block_after_restart() {
     let dir = tempdir().unwrap();
-    unsafe {
-        std::env::set_var("BLOCK_DIR", dir.path());
-    }
+    std::env::set_var("BLOCK_DIR", dir.path());
 
     let node1 = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],

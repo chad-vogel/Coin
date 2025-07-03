@@ -19,9 +19,7 @@ fn sign_vote(path: &str, vote: &mut Vote) {
 #[tokio::test]
 async fn finalize_block_on_votes() {
     let dir = tempdir().unwrap();
-    unsafe {
-        std::env::set_var("BLOCK_DIR", dir.path());
-    }
+    std::env::set_var("BLOCK_DIR", dir.path());
     let node = Node::with_interval(
         vec!["0.0.0.0:0".parse().unwrap()],
         Duration::from_millis(50),

@@ -21,7 +21,7 @@ fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
 
-fn db_exists(path: &Path) -> bool {
+pub(crate) fn db_exists(path: &Path) -> bool {
     path.join("CURRENT").exists()
 }
 
