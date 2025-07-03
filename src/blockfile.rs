@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use rocksdb::{DB, Options};
+use rocksdb::{DB, Env, Options};
 
 use bincode;
 
@@ -18,7 +18,20 @@ fn blockfile_path(dir: &Path, index: u32) -> PathBuf {
 fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     let mut opts = Options::default();
     opts.create_if_missing(create);
-    DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    match DB::open(&opts, path) {
+        Ok(db) => Ok(db),
+        Err(e) => {
+            if e.as_ref().to_string().contains("No locks available") {
+                let mut opts = Options::default();
+                opts.create_if_missing(create);
+                let env = Env::mem_env().map_err(to_io)?;
+                opts.set_env(&env);
+                DB::open(&opts, path).map_err(to_io)
+            } else {
+                Err(to_io(e))
+            }
+        }
+    }
 }
 
 /// Return `true` if a RocksDB database exists at `path`.

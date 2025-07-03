@@ -1,14 +1,28 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use rocksdb::{DB, Options};
+use rocksdb::{DB, Env, Options};
 
 use bincode;
 
 fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     let mut opts = Options::default();
     opts.create_if_missing(create);
-    DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    match DB::open(&opts, path) {
+        Ok(db) => Ok(db),
+        Err(e) => {
+            if e.as_ref().to_string().contains("No locks available") {
+                let mut opts = Options::default();
+                opts.create_if_missing(create);
+                let env = Env::mem_env()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                opts.set_env(&env);
+                DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+            }
+        }
+    }
 }
 
 pub fn save_utxos<P: AsRef<Path>>(path: P, utxos: &HashMap<String, u64>) -> std::io::Result<()> {
