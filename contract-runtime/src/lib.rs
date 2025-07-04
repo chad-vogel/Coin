@@ -246,3 +246,75 @@ impl ContractTxExt for Transaction {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+    use tempfile::tempdir;
+    use wat::parse_str;
+
+    #[test]
+    fn state_roundtrip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let state = Runtime::load_state(&path);
+        assert!(state.is_empty());
+        let mut rt = Runtime::new(Some(path.clone()));
+        rt.state.insert("c".to_string(), {
+            let mut m = HashMap::new();
+            m.insert(0, 1);
+            m
+        });
+        rt.save_state();
+        let loaded = Runtime::load_state(&path);
+        assert_eq!(loaded.get("c").unwrap().get(&0), Some(&1));
+    }
+
+    #[test]
+    #[serial]
+    fn deploy_and_execute_wasm() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let mut rt = Runtime::new(Some(path.clone()));
+        let wat = r#"(module
+            (import "env" "get" (func $get (param i32) (result i64)))
+            (import "env" "set" (func $set (param i32 i64)))
+            (func (export "main") (result i64)
+                (local $v i64)
+                i32.const 0
+                call $get
+                local.set $v
+                i32.const 0
+                local.get $v
+                i64.const 1
+                i64.add
+                call $set
+                i32.const 0
+                call $get))"#;
+        let wasm = parse_str(wat).unwrap();
+        rt.deploy("c", &wasm).unwrap();
+        rt.state.insert("c".to_string(), HashMap::new());
+        let mut gas = 10_000;
+        let res = rt.execute("c", &mut gas).unwrap();
+        assert_eq!(res, 1);
+        assert_eq!(rt.state["c"].get(&0), Some(&1));
+        let saved = Runtime::load_state(&path);
+        assert_eq!(saved.get("c").unwrap().get(&0), Some(&1));
+    }
+
+    #[test]
+    fn contract_tx_construction() {
+        let wasm = vec![1u8, 2, 3];
+        let tx = Transaction::deploy_tx("alice", wasm.clone());
+        let payload: DeployPayload = serde_json::from_slice(&tx.encrypted_message).unwrap();
+        assert_eq!(payload.wasm, wasm);
+        assert_eq!(tx.sender, "alice");
+        assert!(tx.recipient.is_empty());
+
+        let tx = Transaction::invoke_tx("alice", "c1");
+        let payload: InvokePayload = serde_json::from_slice(&tx.encrypted_message).unwrap();
+        assert_eq!(payload.contract, "c1");
+        assert_eq!(tx.sender, "alice");
+    }
+}
