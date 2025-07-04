@@ -606,6 +606,7 @@ impl Node {
                         let max = max;
                         let running = running.clone();
                         let consensus = consensus.clone();
+                        let block_dir = block_dir.clone();
                         tokio::spawn(async move {
                             if !running.load(Ordering::SeqCst) {
                                 return;
