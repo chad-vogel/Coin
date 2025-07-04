@@ -376,6 +376,7 @@ dependencies = [
  "coin-proto",
  "contract-runtime",
  "hex",
+ "once_cell",
  "proptest",
  "ripemd",
  "rocksdb",

@@ -19,8 +19,13 @@ fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     let mut opts = Options::default();
     opts.create_if_missing(create);
     #[cfg(test)]
-    if let Ok(env) = rocksdb::Env::mem_env() {
-        opts.set_env(&env);
+    {
+        fn env() -> &'static rocksdb::Env {
+            use once_cell::sync::OnceCell;
+            static ENV: OnceCell<rocksdb::Env> = OnceCell::new();
+            ENV.get_or_init(|| rocksdb::Env::mem_env().expect("mem env"))
+        }
+        opts.set_env(env());
     }
     DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
