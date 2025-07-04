@@ -64,5 +64,6 @@ async fn reloads_block_after_restart() {
     assert_eq!(block_hash, loaded_hash);
     node2.save_peers().await.unwrap();
     node2.shutdown();
+    // remove env var so later tests have a fresh state
     std::env::remove_var("BLOCK_DIR");
 }

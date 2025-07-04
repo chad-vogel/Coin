@@ -55,6 +55,7 @@ fn state_persistence() {
     assert!(gas < 10_000);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
+    // drop env var to avoid side effects between tests
     std::env::remove_var("CONTRACT_STATE_FILE");
 }
 
