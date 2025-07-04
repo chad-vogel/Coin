@@ -201,4 +201,28 @@ mod tests {
         let hash = hex::decode(block.hash()).unwrap();
         assert!(meets_difficulty(&hash, block.header.difficulty));
     }
+
+    #[test]
+    fn header_bytes_layout() {
+        let header = BlockHeader {
+            previous_hash: "prev".into(),
+            merkle_root: "root".into(),
+            timestamp: 1,
+            nonce: 2,
+            difficulty: 3,
+        };
+        let (bytes, pos) = super::header_bytes(&header);
+        let expected_prefix_len = header.previous_hash.len() + header.merkle_root.len() + 8; // timestamp
+        assert_eq!(pos, expected_prefix_len);
+        assert_eq!(&bytes[pos..pos + 8], &header.nonce.to_be_bytes());
+        assert_eq!(&bytes[pos + 8..pos + 12], &header.difficulty.to_be_bytes());
+    }
+
+    #[test]
+    fn hash_bytes_correctness() {
+        let data = b"test data";
+        let computed = super::hash_bytes(data);
+        let expected = sha2::Sha256::digest(data);
+        assert_eq!(computed.as_ref(), expected.as_slice());
+    }
 }
