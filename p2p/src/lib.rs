@@ -278,36 +278,20 @@ impl Node {
         max_peers: Option<usize>,
         mining_threads: Option<usize>,
     ) -> Self {
-        let (node_key, node_pub) = load_or_create_key("node.key");
-        let stake = Arc::new(Mutex::new(StakeRegistry::new()));
-        let consensus = Arc::new(Mutex::new(ConsensusState::new(StakeRegistry::new())));
-        Self {
+        Self::with_interval(
             listeners,
-            peers: Arc::new(Mutex::new(HashSet::new())),
-            msg_times: Arc::new(Mutex::new(HashMap::new())),
-            ping_interval: Duration::from_secs(5),
+            Duration::from_secs(5),
             node_type,
-            chain: Arc::new(Mutex::new(Blockchain::new())),
-            stake,
-            consensus,
-            min_peers: min_peers.unwrap_or(1),
+            min_peers,
             wallet_address,
-            peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
+            peers_file,
             tor_proxy,
-            network_id: network_id.unwrap_or_else(|| "coin".to_string()),
-            protocol_version: protocol_version.unwrap_or(1),
-            max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
-            max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
-            mining_threads: mining_threads.unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(1)
-            }),
-            node_key,
-            node_pub,
-            key_file: "node.key".to_string(),
-            running: Arc::new(AtomicBool::new(true)),
-        }
+            network_id,
+            protocol_version,
+            max_msgs_per_sec,
+            max_peers,
+            mining_threads,
+        )
     }
 
     pub fn chain_handle(&self) -> Arc<Mutex<Blockchain>> {
