@@ -1096,8 +1096,6 @@ mod tests {
             None,
             None,
             None,
-            None,
-            None,
         );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
