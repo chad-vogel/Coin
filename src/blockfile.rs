@@ -18,6 +18,10 @@ fn blockfile_path(dir: &Path, index: u32) -> PathBuf {
 fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     let mut opts = Options::default();
     opts.create_if_missing(create);
+    #[cfg(test)]
+    if let Ok(env) = rocksdb::Env::mem_env() {
+        opts.set_env(&env);
+    }
     DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
 }
 
