@@ -78,6 +78,7 @@ async fn node_rejects_mismatched_handshake() {
         None,
         None,
         None,
+        None,
     );
     let (addrs, _) = node_a.start().await.unwrap();
     let addr = addrs[0];
@@ -93,6 +94,7 @@ async fn node_rejects_mismatched_handshake() {
         None,
         None,
         None,
+        None,
     );
     assert!(node_b.connect(addr).await.is_err());
     assert!(node_b.peers().await.is_empty());
@@ -105,6 +107,7 @@ async fn node_rejects_mismatched_handshake() {
         None,
         Some("net1".into()),
         Some(2),
+        None,
         None,
         None,
         None,

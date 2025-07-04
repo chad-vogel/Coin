@@ -69,6 +69,7 @@ async fn network_votes_finalize_block() {
             Some(10),
             Some(8),
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -87,6 +88,7 @@ async fn network_votes_finalize_block() {
             Some(10),
             Some(8),
             None,
+            None,
         );
         let (_addrs_b, _) = node_b.start().await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -104,6 +106,7 @@ async fn network_votes_finalize_block() {
             None,
             Some(10),
             Some(8),
+            None,
             None,
         );
         let (_addrs_c, _) = node_c.start().await.unwrap();
@@ -199,6 +202,7 @@ async fn peer_limit_and_rate_limit() {
         None,
         Some(5),
         Some(2),
+        None,
         None,
     );
     let (addrs, _) = node.start().await.unwrap();

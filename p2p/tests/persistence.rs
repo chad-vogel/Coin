@@ -8,9 +8,6 @@ const MINER: &str = "1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr";
 #[tokio::test]
 async fn reloads_block_after_restart() {
     let dir = tempdir().unwrap();
-    unsafe {
-        std::env::set_var("BLOCK_DIR", dir.path());
-    }
 
     let node1 = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
@@ -24,6 +21,7 @@ async fn reloads_block_after_restart() {
         None,
         None,
         None,
+        Some(dir.path().to_str().unwrap().to_string()),
     );
     let _ = node1.start().await.unwrap();
 
@@ -48,6 +46,7 @@ async fn reloads_block_after_restart() {
         None,
         None,
         None,
+        Some(dir.path().to_str().unwrap().to_string()),
     );
     if let Ok(chain) = Blockchain::load(dir.path()) {
         *node2.chain_handle().lock().await = chain;
