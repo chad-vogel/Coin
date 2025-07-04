@@ -1598,6 +1598,55 @@ mod tests {
         assert_eq!(bc.balance(&addr2), 10);
     }
 
+    #[test]
+    fn lock_and_unlock_stake() {
+        let mut bc = Blockchain::new();
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        });
+        let subsidy = bc.block_subsidy();
+        assert!(bc.lock_stake(A1, subsidy / 2));
+        assert_eq!(bc.locked_balance(A1), subsidy / 2);
+        assert_eq!(bc.balance(A1), subsidy as i64 / 2);
+        assert!(bc.unlock_stake(A1, subsidy / 2));
+        assert_eq!(bc.locked_balance(A1), 0);
+        assert_eq!(bc.balance(A1), subsidy as i64);
+        assert!(!bc.unlock_stake(A1, 1));
+    }
+
+    #[test]
+    fn lock_stake_rejects_insufficient_balance() {
+        let mut bc = Blockchain::new();
+        assert!(!bc.lock_stake(A1, 10));
+    }
+
+    #[test]
+    fn subsidy_for_height_respects_halving_and_max() {
+        // initial subsidy
+        assert_eq!(Blockchain::subsidy_for_height(0, 0), BLOCK_SUBSIDY);
+        // halving after HALVING_INTERVAL blocks
+        assert_eq!(
+            Blockchain::subsidy_for_height(HALVING_INTERVAL, 0),
+            BLOCK_SUBSIDY / 2
+        );
+        // adjust reward when near MAX_SUPPLY
+        let near_max = MAX_SUPPLY - BLOCK_SUBSIDY / 3;
+        assert_eq!(
+            Blockchain::subsidy_for_height(0, near_max),
+            BLOCK_SUBSIDY / 3
+        );
+        // no reward once MAX_SUPPLY reached
+        assert_eq!(Blockchain::subsidy_for_height(0, MAX_SUPPLY), 0);
+    }
+
     // Strategy to generate random valid addresses using secret keys
     fn arb_address() -> impl Strategy<Value = String> {
         any::<[u8; 32]>()
