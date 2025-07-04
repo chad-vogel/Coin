@@ -8,7 +8,8 @@ fn deploy_and_invoke() {
     // wasm module that returns 42 from main
     let wat = "(module (func (export \"main\") (result i64) i64.const 42))";
     let wasm = wat::parse_str(wat).expect("compile");
-    let mut rt = Runtime::new();
+    let dir = tempfile::tempdir().unwrap();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("alice", &wasm).expect("deploy");
     let mut gas = 1_000;
     let result = rt.execute("alice", &mut gas).expect("execute");
@@ -17,7 +18,8 @@ fn deploy_and_invoke() {
 }
 #[test]
 fn execute_missing() {
-    let mut rt = Runtime::new();
+    let dir = tempfile::tempdir().unwrap();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     let mut gas = 1;
     assert!(rt.execute("none", &mut gas).is_err());
 }
@@ -47,19 +49,13 @@ fn state_persistence() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("alice", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
     assert!(gas < 10_000);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("alice", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
 }
 
 #[test]
@@ -79,30 +75,25 @@ fn state_reload_from_disk() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
     {
-        let mut rt = Runtime::new();
+        let mut rt = Runtime::new(Some(dir.path().join("state.json")));
         rt.deploy("alice", &wasm).unwrap();
         let mut gas = 10_000;
         assert_eq!(rt.execute("alice", &mut gas).unwrap(), 1);
     }
     {
-        let mut rt = Runtime::new();
+        let mut rt = Runtime::new(Some(dir.path().join("state.json")));
         rt.deploy("alice", &wasm).unwrap();
         let mut gas = 10_000;
         assert_eq!(rt.execute("alice", &mut gas).unwrap(), 2);
-    }
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
     }
 }
 #[test]
 fn out_of_gas() {
     let wat = "(module (func (export \"main\") (result i64) i64.const 1))";
     let wasm = wat::parse_str(wat).unwrap();
-    let mut rt = Runtime::new();
+    let dir = tempfile::tempdir().unwrap();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("carol", &wasm).unwrap();
     let mut gas = 0;
     assert!(rt.execute("carol", &mut gas).is_err());
@@ -113,7 +104,8 @@ fn gas_consumption() {
     // empty function that returns 0
     let wat = "(module (func (export \"main\") (result i64) i64.const 0))";
     let wasm = wat::parse_str(wat).unwrap();
-    let mut rt = Runtime::new();
+    let dir = tempfile::tempdir().unwrap();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("dave", &wasm).unwrap();
     let mut gas = 10;
     assert!(rt.execute("dave", &mut gas).is_ok());
@@ -137,18 +129,12 @@ fn bool_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("bob", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("bob", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("bob", &mut gas2).unwrap(), 0);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
 }
 
 #[test]
@@ -177,18 +163,12 @@ fn u128_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("eve", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("eve", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("eve", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
 }
 
 #[test]
@@ -223,18 +203,12 @@ fn u256_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("frank", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("frank", &mut gas).unwrap(), 1);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("frank", &mut gas2).unwrap(), 2);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
 }
 
 #[test]
@@ -269,16 +243,10 @@ fn address_storage() {
     "#;
     let wasm = wat::parse_str(wat).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    unsafe {
-        std::env::set_var("CONTRACT_STATE_FILE", dir.path().join("state.json"));
-    }
-    let mut rt = Runtime::new();
+    let mut rt = Runtime::new(Some(dir.path().join("state.json")));
     rt.deploy("gina", &wasm).unwrap();
     let mut gas = 10_000;
     assert_eq!(rt.execute("gina", &mut gas).unwrap(), 11);
     let mut gas2 = 10_000;
     assert_eq!(rt.execute("gina", &mut gas2).unwrap(), 55);
-    unsafe {
-        std::env::remove_var("CONTRACT_STATE_FILE");
-    }
 }

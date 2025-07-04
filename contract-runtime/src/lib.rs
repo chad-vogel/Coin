@@ -3,11 +3,14 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::fs;
+use std::path::{Path, PathBuf};
 
 const STATE_FILE: &str = "runtime_state.json";
 
-fn state_path() -> String {
-    std::env::var("CONTRACT_STATE_FILE").unwrap_or_else(|_| STATE_FILE.to_string())
+fn default_state_path() -> PathBuf {
+    std::env::var("CONTRACT_STATE_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(STATE_FILE))
 }
 use wasmi::{Caller, Config, Engine, Linker, Module, Store};
 
@@ -15,17 +18,17 @@ pub struct Runtime {
     engine: Engine,
     modules: HashMap<String, Module>,
     state: HashMap<String, HashMap<i32, i64>>,
+    state_path: PathBuf,
 }
 
 impl Default for Runtime {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 impl Runtime {
-    fn load_state() -> HashMap<String, HashMap<i32, i64>> {
-        let path = state_path();
+    fn load_state(path: &Path) -> HashMap<String, HashMap<i32, i64>> {
         if let Ok(data) = fs::read_to_string(path) {
             serde_json::from_str(&data).unwrap_or_default()
         } else {
@@ -35,18 +38,20 @@ impl Runtime {
 
     fn save_state(&self) {
         if let Ok(data) = serde_json::to_string(&self.state) {
-            let path = state_path();
-            let _ = fs::write(path, data);
+            let _ = fs::write(&self.state_path, data);
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new(state_path: Option<PathBuf>) -> Self {
         let mut config = Config::default();
         config.consume_fuel(true);
+        let path = state_path.unwrap_or_else(default_state_path);
+        let state = Self::load_state(&path);
         Self {
             engine: Engine::new(&config),
             modules: HashMap::new(),
-            state: Self::load_state(),
+            state,
+            state_path: path,
         }
     }
 

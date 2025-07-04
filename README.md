@@ -172,7 +172,7 @@ let wat = "(module (func (export \"main\") (result i32) i32.const 42))";
 let wasm = wat::parse_str(wat).unwrap();
 
 // Deploy and run a contract
-let mut rt = Runtime::new();
+let mut rt = Runtime::new(None);
 rt.deploy("alice", &wasm).unwrap();
 let mut gas = 1_000_000;
 let result = rt.execute("alice", &mut gas).unwrap();
