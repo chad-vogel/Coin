@@ -114,4 +114,5 @@ async fn finalize_block_on_votes() {
     let saved = Blockchain::load(dir.path()).unwrap_or_else(|e| panic!("{:?}", e));
     assert_eq!(saved.len(), 2);
     node.shutdown();
+    std::env::remove_var("BLOCK_DIR");
 }

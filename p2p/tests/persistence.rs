@@ -64,4 +64,5 @@ async fn reloads_block_after_restart() {
     assert_eq!(block_hash, loaded_hash);
     node2.save_peers().await.unwrap();
     node2.shutdown();
+    std::env::remove_var("BLOCK_DIR");
 }
