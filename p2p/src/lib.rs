@@ -33,10 +33,6 @@ const DEFAULT_MAX_PEERS: usize = 32;
 const MAX_MSG_BYTES: usize = 1024 * 1024; // 1 MiB
 const MAX_TIME_DRIFT_MS: i64 = 2 * 60 * 60 * 1000; // 2 hours
 
-fn block_dir() -> String {
-    std::env::var("BLOCK_DIR").unwrap_or_else(|_| "blocks".to_string())
-}
-
 /// Send a length-prefixed JSON-RPC message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
     write_rpc(socket, msg).await
@@ -261,6 +257,7 @@ pub struct Node {
     node_key: secp256k1::SecretKey,
     node_pub: secp256k1::PublicKey,
     key_file: String,
+    block_dir: String,
     running: Arc<AtomicBool>,
 }
 
@@ -277,6 +274,7 @@ impl Node {
         max_msgs_per_sec: Option<u32>,
         max_peers: Option<usize>,
         mining_threads: Option<usize>,
+        block_dir: Option<String>,
     ) -> Self {
         let (node_key, node_pub) = load_or_create_key("node.key");
         let stake = Arc::new(Mutex::new(StakeRegistry::new()));
@@ -306,6 +304,7 @@ impl Node {
             node_key,
             node_pub,
             key_file: "node.key".to_string(),
+            block_dir: block_dir.unwrap_or_else(|| "blocks".to_string()),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -336,6 +335,7 @@ impl Node {
         max_msgs_per_sec: Option<u32>,
         max_peers: Option<usize>,
         mining_threads: Option<usize>,
+        block_dir: Option<String>,
     ) -> Self {
         let (node_key, node_pub) = load_or_create_key("node.key");
         let stake = Arc::new(Mutex::new(StakeRegistry::new()));
@@ -365,6 +365,7 @@ impl Node {
             node_key,
             node_pub,
             key_file: "node.key".to_string(),
+            block_dir: block_dir.unwrap_or_else(|| "blocks".to_string()),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -449,6 +450,7 @@ impl Node {
         let pubk = self.node_pub.clone();
         let running = self.running.clone();
         let consensus = self.consensus.clone();
+        let block_dir = self.block_dir.clone();
         tokio::spawn(async move {
             loop {
                 if !running.load(Ordering::SeqCst) {
@@ -569,6 +571,7 @@ impl Node {
         let key = self.node_key.clone();
         let pubk = self.node_pub.clone();
         let consensus = self.consensus.clone();
+        let block_dir = self.block_dir.clone();
 
         // accept loop for each listener
         for listener in listeners {
@@ -584,6 +587,7 @@ impl Node {
             let key = key.clone();
             let pubk = pubk.clone();
             let consensus = consensus.clone();
+            let block_dir = block_dir.clone();
             tokio::spawn(async move {
                 loop {
                     if !running.load(Ordering::SeqCst) {
@@ -602,6 +606,7 @@ impl Node {
                         let max = max;
                         let running = running.clone();
                         let consensus = consensus.clone();
+                        let block_dir = block_dir.clone();
                         tokio::spawn(async move {
                             if !running.load(Ordering::SeqCst) {
                                 return;
@@ -782,13 +787,14 @@ impl Node {
                                                             .register_vote(&vote);
                                                         if reached {
                                                             let mut chain = chain.lock().await;
-                                                            let _ = chain.save(&block_dir());
+                                                            let _ = chain.save(&block_dir);
                                                             let _ = consensus
                                                                 .lock()
                                                                 .await
-                                                                .save_finalized(
-                                                                    block_dir() + "/finalized.bin",
-                                                                );
+                                                                .save_finalized(format!(
+                                                                    "{}/finalized.bin",
+                                                                    block_dir
+                                                                ));
                                                         }
                                                     }
                                                 }
@@ -961,12 +967,12 @@ impl Node {
         };
         if finalized {
             let mut chain = self.chain.lock().await;
-            let _ = chain.save(&block_dir());
+            let _ = chain.save(&self.block_dir);
             let _ = self
                 .consensus
                 .lock()
                 .await
-                .save_finalized(block_dir() + "/finalized.bin");
+                .save_finalized(format!("{}/finalized.bin", self.block_dir));
             let slot = chain.len() as u64;
             drop(chain);
             let _ = self.broadcast_finalized(vote.block_hash.clone()).await;
@@ -1089,6 +1095,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
@@ -1144,6 +1151,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1190,6 +1198,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -1204,6 +1213,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1234,6 +1244,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1295,6 +1306,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1334,6 +1346,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -1349,6 +1362,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1407,6 +1421,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1477,6 +1492,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1485,6 +1501,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
+            None,
             None,
             None,
             None,
@@ -1676,6 +1693,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _rx) = miner.start().await.unwrap();
         sleep(Duration::from_millis(200)).await;
@@ -1690,6 +1708,7 @@ mod tests {
             NodeType::Miner,
             Some(0),
             Some(A1.to_string()),
+            None,
             None,
             None,
             None,
@@ -1744,6 +1763,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -1789,6 +1809,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
@@ -1807,6 +1828,7 @@ mod tests {
             None,
             None,
             Some(file.clone()),
+            None,
             None,
             None,
             None,
@@ -1832,6 +1854,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_a2, _r2) = node2.start().await.unwrap();
         assert!(node2.peers().await.contains(&peer));
@@ -1851,6 +1874,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node_a.start().await.unwrap();
         let addr = addrs[0];
@@ -1863,6 +1887,7 @@ mod tests {
             None,
             Some("net2".into()),
             Some(1),
+            None,
             None,
             None,
             None,
@@ -1882,6 +1907,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         assert!(node_c.connect(addr).await.is_err());
         assert!(node_c.peers().await.is_empty());
@@ -1892,6 +1918,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -1936,6 +1963,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1970,6 +1998,7 @@ mod tests {
             None,
             None,
             Some(5),
+            None,
             None,
             None,
         );
@@ -2016,6 +2045,7 @@ mod tests {
             Some(1),
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2058,6 +2088,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -2126,6 +2157,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2179,6 +2211,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2218,11 +2251,13 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let node_b = Node::with_interval(
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -2254,11 +2289,13 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let node_b = Node::with_interval(
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -2298,6 +2335,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (_addrs, _) = node.start().await.unwrap();
         assert_eq!(node.chain.lock().await.mempool_len(), 1);
@@ -2311,6 +2349,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,
@@ -2375,6 +2414,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2423,6 +2463,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
+            None,
             None,
             None,
             None,

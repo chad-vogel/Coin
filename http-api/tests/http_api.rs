@@ -20,6 +20,7 @@ async fn test_http_endpoints() {
         None,
         None,
         None,
+        None,
     );
     let reward;
     {
