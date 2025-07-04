@@ -571,6 +571,7 @@ impl Node {
         let key = self.node_key.clone();
         let pubk = self.node_pub.clone();
         let consensus = self.consensus.clone();
+        let block_dir = self.block_dir.clone();
 
         // accept loop for each listener
         for listener in listeners {
