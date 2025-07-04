@@ -643,21 +643,22 @@ impl Blockchain {
         fs::create_dir_all(dir)?;
         if blockfile::db_exists(dir) {
             let _ = rocksdb::DB::destroy(&Options::default(), dir);
-        } else {
-            // cleanup any legacy files
-            for entry in fs::read_dir(dir)? {
-                let entry = entry?;
-                if let Some(name) = entry.file_name().to_str() {
-                    if name.starts_with("blk") && name.ends_with(".dat") {
-                        let _ = fs::remove_file(entry.path());
-                    }
+        }
+        // remove any leftover files (including legacy files)
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if let Some(name) = entry.file_name().to_str() {
+                if name.starts_with("blk") && name.ends_with(".dat") {
+                    let _ = fs::remove_file(entry.path());
+                } else if name != "." && name != ".." {
+                    let _ = fs::remove_file(entry.path());
                 }
             }
         }
         for block in &self.chain {
             blockfile::append_block(dir, block)?;
         }
-        utxofile::save_utxos(dir, &self.utxos)?;
+        utxofile::save_utxos(dir.join("utxos.bin"), &self.utxos)?;
         Ok(())
     }
 
@@ -682,11 +683,11 @@ impl Blockchain {
             ));
         }
         let saved_utxos = if blockfile::db_exists(dir) {
-            utxofile::load_utxos(dir).ok()
+            utxofile::load_utxos(dir.join("utxos.bin")).ok()
         } else {
             let map = utxofile::load_utxos(dir.join("utxos.bin")).ok();
             if let Some(ref m) = map {
-                let _ = utxofile::save_utxos(dir, m);
+                let _ = utxofile::save_utxos(dir.join("utxos.bin"), m);
             }
             map
         };

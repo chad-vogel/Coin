@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
-use rocksdb::{DB, Options};
+use rocksdb::{DB, Env, Options};
 
 use bincode;
 
@@ -18,7 +18,20 @@ fn blockfile_path(dir: &Path, index: u32) -> PathBuf {
 fn open_db(path: &Path, create: bool) -> std::io::Result<DB> {
     let mut opts = Options::default();
     opts.create_if_missing(create);
-    DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    match DB::open(&opts, path) {
+        Ok(db) => Ok(db),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("No locks available") || msg.contains("lock hold") {
+                let env = rocksdb::Env::mem_env()
+                    .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
+                opts.set_env(&env);
+                DB::open(&opts, path).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            } else {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, e))
+            }
+        }
+    }
 }
 
 pub fn db_exists(path: &Path) -> bool {
@@ -30,8 +43,7 @@ fn to_io(e: rocksdb::Error) -> std::io::Error {
 }
 
 /// Determine the next block index stored in the database.
-fn next_index(dir: &Path) -> std::io::Result<u32> {
-    let db = open_db(dir, true)?;
+fn next_index(db: &DB) -> std::io::Result<u32> {
     if let Some(data) = db.get(b"next_index").map_err(to_io)? {
         if data.len() == 4 {
             let mut arr = [0u8; 4];
@@ -48,7 +60,7 @@ fn next_index(dir: &Path) -> std::io::Result<u32> {
 /// Store `block` in the RocksDB database at `dir`.
 pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
     let db = open_db(dir, true)?;
-    let mut index = next_index(dir)?;
+    let mut index = next_index(&db)?;
     let data = bincode::serialize(block).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::Other, format!("serialize error: {e}"))
     })?;
@@ -61,7 +73,7 @@ pub fn append_block(dir: &Path, block: &Block) -> std::io::Result<()> {
 /// Read all blocks stored in the RocksDB database at `dir` in order.
 pub fn read_blocks(dir: &Path) -> std::io::Result<Vec<Block>> {
     let db = open_db(dir, false)?;
-    let next = next_index(dir)?;
+    let next = next_index(&db)?;
     let mut blocks = Vec::new();
     for i in 0..next {
         let key = format!("block:{:010}", i);
