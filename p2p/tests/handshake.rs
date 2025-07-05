@@ -1,4 +1,4 @@
-use coin_p2p::{Node, NodeType, sign_handshake, verify_handshake};
+use coin_p2p::{Node, NodeConfig, NodeType, sign_handshake, verify_handshake};
 use coin_proto::Handshake;
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
@@ -69,48 +69,33 @@ async fn node_rejects_mismatched_handshake() {
     let node_a = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        Some("net1".into()),
-        Some(1),
-        None,
-        None,
-        None,
-        None,
+        NodeConfig {
+            network_id: Some("net1".into()),
+            protocol_version: Some(1),
+            ..Default::default()
+        },
     );
     let (addrs, _) = node_a.start().await.unwrap();
     let addr = addrs[0];
     let node_b = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        Some("net2".into()),
-        Some(1),
-        None,
-        None,
-        None,
-        None,
+        NodeConfig {
+            network_id: Some("net2".into()),
+            protocol_version: Some(1),
+            ..Default::default()
+        },
     );
     assert!(node_b.connect(addr).await.is_err());
     assert!(node_b.peers().await.is_empty());
     let node_c = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        Some("net1".into()),
-        Some(2),
-        None,
-        None,
-        None,
-        None,
+        NodeConfig {
+            network_id: Some("net1".into()),
+            protocol_version: Some(2),
+            ..Default::default()
+        },
     );
     assert!(node_c.connect(addr).await.is_err());
     assert!(node_c.peers().await.is_empty());

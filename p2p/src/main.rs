@@ -26,16 +26,17 @@ async fn main() -> Result<()> {
     let node = Node::new(
         cfg.listener_addrs(),
         cfg.node_type,
-        None,
-        cfg.wallet_address.clone(),
-        None,
-        tor_proxy,
-        Some(cfg.network_id.clone()),
-        Some(cfg.protocol_version),
-        Some(cfg.max_msgs_per_sec),
-        Some(cfg.max_peers),
-        cfg.mining_threads,
-        Some(cfg.block_dir.clone()),
+        NodeConfig {
+            wallet_address: cfg.wallet_address.clone(),
+            tor_proxy,
+            network_id: Some(cfg.network_id.clone()),
+            protocol_version: Some(cfg.protocol_version),
+            max_msgs_per_sec: Some(cfg.max_msgs_per_sec),
+            max_peers: Some(cfg.max_peers),
+            mining_threads: cfg.mining_threads,
+            block_dir: Some(cfg.block_dir.clone()),
+            ..Default::default()
+        },
     );
     if let Ok(chain) = Blockchain::load(&cfg.block_dir) {
         *node.chain_handle().lock().await = chain;

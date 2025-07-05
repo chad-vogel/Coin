@@ -1,5 +1,5 @@
 use coin::Blockchain;
-use coin_p2p::{Node, NodeType};
+use coin_p2p::{Node, NodeConfig, NodeType};
 use miner::mine_block;
 use tempfile::tempdir;
 
@@ -12,16 +12,10 @@ async fn reloads_block_after_restart() {
     let node1 = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(dir.path().to_str().unwrap().to_string()),
+        NodeConfig {
+            block_dir: Some(dir.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        },
     );
     let _ = node1.start().await.unwrap();
 
@@ -37,16 +31,10 @@ async fn reloads_block_after_restart() {
     let node2 = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(dir.path().to_str().unwrap().to_string()),
+        NodeConfig {
+            block_dir: Some(dir.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        },
     );
     if let Ok(chain) = Blockchain::load(dir.path()) {
         *node2.chain_handle().lock().await = chain;

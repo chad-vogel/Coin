@@ -1,5 +1,5 @@
 use coin::{Block, BlockHeader, coinbase_transaction};
-use coin_p2p::{Node, NodeType};
+use coin_p2p::{Node, NodeConfig, NodeType};
 use coin_proto::Transaction;
 use hyper::{Body, Method, Request, StatusCode};
 use reqwest::Client;
@@ -11,16 +11,7 @@ async fn test_http_endpoints() {
     let node = Node::new(
         vec!["0.0.0.0:0".parse().unwrap()],
         NodeType::Wallet,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        NodeConfig::default(),
     );
     let reward;
     {
