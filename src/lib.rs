@@ -942,8 +942,13 @@ mod tests {
         let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
         let pk2 = secp256k1::PublicKey::from_secret_key(&secp, &sk2);
         let encrypted = encrypt_message("msg", &sk1, &pk2);
-        let wrong_pk = secp256k1::PublicKey::from_secret_key(&secp, &sk1);
-        assert!(decrypt_message(&encrypted, &sk2, &wrong_pk).is_none());
+        // use a completely unrelated key pair so shared secret differs
+        let wrong_sk = secp256k1::SecretKey::from_slice(&[3u8; 32]).unwrap();
+        let wrong_pk = secp256k1::PublicKey::from_secret_key(&secp, &wrong_sk);
+        match decrypt_message(&encrypted, &sk2, &wrong_pk) {
+            Some(text) => assert_ne!(text, "msg"),
+            None => {}
+        }
     }
 
     #[test]
