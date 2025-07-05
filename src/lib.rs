@@ -1214,6 +1214,15 @@ mod tests {
     }
 
     #[test]
+    fn load_mempool_invalid_data() {
+        let mut bc = Blockchain::new();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), b"not json").unwrap();
+        let res = bc.load_mempool(tmp.path());
+        assert!(res.is_err());
+    }
+
+    #[test]
     fn merkle_root_tree() {
         let tx1 = coinbase_transaction(A1, 1).unwrap();
         let tx2 = coinbase_transaction(A2, 1).unwrap();
