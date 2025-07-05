@@ -154,8 +154,8 @@ async fn network_votes_finalize_block() {
             let chain_handle = node_a.chain_handle();
             let mut cs = consensus_handle.lock().await;
             let mut chain = chain_handle.lock().await;
-            cs.registry_mut().stake(&mut chain, A1, 30);
-            cs.registry_mut().stake(&mut chain, A2, 30);
+            cs.registry_mut().stake(&mut chain, A1, 30).unwrap();
+            cs.registry_mut().stake(&mut chain, A2, 30).unwrap();
             cs.registry_mut().advance_round(&mut chain);
             cs.start_round(hash.clone(), &mut chain);
         }
