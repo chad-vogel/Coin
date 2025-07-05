@@ -1,4 +1,4 @@
-use coin_p2p::{Node, NodeType, sign_handshake, verify_handshake};
+use coin_p2p::{Node, NodeConfig, NodeType, sign_handshake, verify_handshake};
 use coin_proto::Handshake;
 use rand::rngs::OsRng;
 use secp256k1::{PublicKey, Secp256k1, SecretKey};
