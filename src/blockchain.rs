@@ -1,9 +1,8 @@
 use crate::compute_merkle_root;
-use crate::transaction::{TransactionExt, coinbase_transaction, valid_address};
+use crate::transaction::{TransactionExt, valid_address};
 use crate::{Block, BlockHeader, Transaction, blockfile, utxofile};
 use contract_runtime;
 use serde_json;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;

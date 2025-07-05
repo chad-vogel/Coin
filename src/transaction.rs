@@ -1,5 +1,5 @@
 use bs58;
-use coin_proto::{Transaction, TransactionInput, TransactionOutput};
+use coin_proto::{Transaction, TransactionOutput};
 use ripemd::Ripemd160;
 use secp256k1;
 use sha2::{Digest, Sha256};

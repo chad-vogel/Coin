@@ -50,6 +50,7 @@ pub fn compute_merkle_root(txs: &[Transaction]) -> String {
     merkle_root_from_hashes(&hashes)
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
