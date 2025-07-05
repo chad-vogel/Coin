@@ -1,4 +1,4 @@
-use coin_p2p::rpc::{self, RpcMessage, read_rpc, write_rpc};
+use coin_p2p::rpc::{self, RpcMessage, RpcTransport};
 use coin_p2p::sign_handshake;
 use coin_proto::{GetBalance, GetBlocks, Handshake, Transaction};
 use hyper::service::{make_service_fn, service_fn};
@@ -21,10 +21,10 @@ async fn forward_rpc(node: SocketAddr, msg: &RpcMessage) -> std::io::Result<Opti
         public_key: pk.serialize().to_vec(),
         signature: sign_handshake(&sk, "coin", 1),
     });
-    write_rpc(&mut stream, &hs).await?;
-    let _ = read_rpc(&mut stream).await?;
-    write_rpc(&mut stream, msg).await?;
-    match timeout(Duration::from_secs(1), read_rpc(&mut stream)).await {
+    stream.write_rpc(&hs).await?;
+    let _ = stream.read_rpc().await?;
+    stream.write_rpc(msg).await?;
+    match timeout(Duration::from_secs(1), stream.read_rpc()).await {
         Ok(Ok(r)) => Ok(Some(r)),
         Ok(Err(e)) => Err(e),
         Err(_) => Ok(None),
@@ -155,7 +155,7 @@ pub async fn serve(addr: &str, node: &str) -> hyper::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
+    use coin_p2p::rpc::{RpcMessage, RpcTransport};
     use coin_proto::{Balance, GetBalance, Handshake};
     use reqwest::Client;
     use tokio::net::TcpListener;
@@ -167,19 +167,19 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
-            if let RpcMessage::Handshake(_) = read_rpc(&mut stream).await.unwrap() {
+            if let RpcMessage::Handshake(_) = stream.read_rpc().await.unwrap() {
                 let reply = RpcMessage::Handshake(Handshake {
                     network_id: "coin".into(),
                     version: 1,
                     public_key: vec![],
                     signature: vec![],
                 });
-                write_rpc(&mut stream, &reply).await.unwrap();
+                stream.write_rpc(&reply).await.unwrap();
             }
-            if let RpcMessage::GetBalance(gb) = read_rpc(&mut stream).await.unwrap() {
+            if let RpcMessage::GetBalance(gb) = stream.read_rpc().await.unwrap() {
                 assert_eq!(gb.address, "alice");
                 let resp = RpcMessage::Balance(Balance { amount: 5 });
-                write_rpc(&mut stream, &resp).await.unwrap();
+                stream.write_rpc(&resp).await.unwrap();
             }
         });
 

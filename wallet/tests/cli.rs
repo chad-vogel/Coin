@@ -2,7 +2,7 @@
 
 use assert_cmd::Command;
 use coin_p2p::{
-    rpc::{RpcMessage, read_rpc, write_rpc},
+    rpc::{RpcMessage, RpcTransport},
     sign_handshake,
 };
 use coin_proto::{Handshake, Stake, Unstake};
@@ -107,7 +107,7 @@ async fn stake_and_unstake_commands() {
 
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-        if let RpcMessage::Handshake(_) = read_rpc(&mut stream).await.unwrap() {
+        if let RpcMessage::Handshake(_) = stream.read_rpc().await.unwrap() {
             let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
             let pk = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
             let resp = RpcMessage::Handshake(Handshake {
@@ -116,9 +116,9 @@ async fn stake_and_unstake_commands() {
                 public_key: pk.serialize().to_vec(),
                 signature: sign_handshake(&sk, "coin", 1),
             });
-            write_rpc(&mut stream, &resp).await.unwrap();
+            stream.write_rpc(&resp).await.unwrap();
         }
-        if let RpcMessage::Stake(s) = read_rpc(&mut stream).await.unwrap() {
+        if let RpcMessage::Stake(s) = stream.read_rpc().await.unwrap() {
             assert_eq!(s.address, addr);
             assert_eq!(s.amount, 5);
         } else {
@@ -126,7 +126,7 @@ async fn stake_and_unstake_commands() {
         }
 
         let (mut stream, _) = listener.accept().await.unwrap();
-        if let RpcMessage::Handshake(_) = read_rpc(&mut stream).await.unwrap() {
+        if let RpcMessage::Handshake(_) = stream.read_rpc().await.unwrap() {
             let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
             let pk = PublicKey::from_secret_key(&Secp256k1::new(), &sk);
             let resp = RpcMessage::Handshake(Handshake {
@@ -135,9 +135,9 @@ async fn stake_and_unstake_commands() {
                 public_key: pk.serialize().to_vec(),
                 signature: sign_handshake(&sk, "coin", 1),
             });
-            write_rpc(&mut stream, &resp).await.unwrap();
+            stream.write_rpc(&resp).await.unwrap();
         }
-        if let RpcMessage::Unstake(u) = read_rpc(&mut stream).await.unwrap() {
+        if let RpcMessage::Unstake(u) = stream.read_rpc().await.unwrap() {
             assert_eq!(u.address, addr);
         } else {
             panic!("expected unstake msg");

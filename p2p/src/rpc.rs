@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use coin_proto::{
     Balance, Block, Chain, Finalized, GetBalance, GetBlock, GetBlocks, GetChain, GetPeers,
     GetTransaction, Handshake, Peers, Ping, Pong, Schedule, Stake, Transaction, TransactionDetail,
@@ -5,7 +6,7 @@ use coin_proto::{
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 #[derive(Clone, Debug)]
@@ -149,19 +150,22 @@ fn params_to_value(p: jsonrpc_lite::Params) -> Value {
     }
 }
 
-pub async fn write_rpc(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
+async fn write_rpc_impl<W: AsyncWrite + Unpin>(
+    io: &mut W,
+    msg: &RpcMessage,
+) -> tokio::io::Result<()> {
     let rpc = encode_message(msg);
     let data = serde_json::to_vec(&rpc)
         .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?;
     let len = (data.len() as u32).to_be_bytes();
-    socket.write_all(&len).await?;
-    socket.write_all(&data).await?;
+    io.write_all(&len).await?;
+    io.write_all(&data).await?;
     Ok(())
 }
 
-pub async fn read_rpc(socket: &mut TcpStream) -> tokio::io::Result<RpcMessage> {
+async fn read_rpc_impl<R: AsyncRead + Unpin>(io: &mut R) -> tokio::io::Result<RpcMessage> {
     let mut len_buf = [0u8; 4];
-    socket.read_exact(&mut len_buf).await?;
+    io.read_exact(&mut len_buf).await?;
     let len = u32::from_be_bytes(len_buf) as usize;
     if len > 1024 * 1024 {
         return Err(tokio::io::Error::new(
@@ -170,65 +174,96 @@ pub async fn read_rpc(socket: &mut TcpStream) -> tokio::io::Result<RpcMessage> {
         ));
     }
     let mut buf = vec![0u8; len];
-    socket.read_exact(&mut buf).await?;
+    io.read_exact(&mut buf).await?;
     let rpc: JsonRpc = serde_json::from_slice(&buf)
         .map_err(|e| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, e))?;
     decode_message(rpc)
         .ok_or_else(|| tokio::io::Error::new(tokio::io::ErrorKind::InvalidData, "invalid rpc"))
 }
 
+#[async_trait]
+pub trait RpcTransport: Send {
+    async fn write_rpc(&mut self, msg: &RpcMessage) -> tokio::io::Result<()>;
+    async fn read_rpc(&mut self) -> tokio::io::Result<RpcMessage>;
+}
+
+#[async_trait]
+impl<T> RpcTransport for T
+where
+    T: AsyncRead + AsyncWrite + Unpin + Send,
+{
+    async fn write_rpc(&mut self, msg: &RpcMessage) -> tokio::io::Result<()> {
+        write_rpc_impl(self, msg).await
+    }
+
+    async fn read_rpc(&mut self) -> tokio::io::Result<RpcMessage> {
+        read_rpc_impl(self).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::RpcTransport;
     use super::*;
-    use tokio::net::TcpListener;
+    use tokio::io::{self, DuplexStream};
+
+    struct MockTransport {
+        inner: DuplexStream,
+    }
+
+    impl MockTransport {
+        fn pair() -> (Self, Self) {
+            let (a, b) = io::duplex(1024);
+            (Self { inner: a }, Self { inner: b })
+        }
+    }
+
+    #[async_trait]
+    impl RpcTransport for MockTransport {
+        async fn write_rpc(&mut self, msg: &RpcMessage) -> tokio::io::Result<()> {
+            write_rpc_impl(&mut self.inner, msg).await
+        }
+
+        async fn read_rpc(&mut self) -> tokio::io::Result<RpcMessage> {
+            read_rpc_impl(&mut self.inner).await
+        }
+    }
 
     #[tokio::test]
     async fn write_and_read_roundtrip() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let client = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(addr).await.unwrap();
-            write_rpc(&mut stream, &RpcMessage::Ping).await.unwrap();
-        });
-
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let msg = read_rpc(&mut stream).await.unwrap();
+        let (mut a, mut b) = MockTransport::pair();
+        a.write_rpc(&RpcMessage::Ping).await.unwrap();
+        let msg = b.read_rpc().await.unwrap();
         assert!(matches!(msg, RpcMessage::Ping));
-        client.await.unwrap();
     }
 
     #[tokio::test]
     async fn read_rpc_rejects_large_message() {
         use tokio::io::AsyncWriteExt;
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let client = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(addr).await.unwrap();
+        let (mut a, mut b) = MockTransport::pair();
+        tokio::spawn(async move {
             let len = (1024 * 1024 + 1u32).to_be_bytes();
-            stream.write_all(&len).await.unwrap();
-            stream.write_all(&vec![0u8; 1024 * 1024 + 1]).await.unwrap();
+            a.inner.write_all(&len).await.unwrap();
+            a.inner
+                .write_all(&vec![0u8; 1024 * 1024 + 1])
+                .await
+                .unwrap();
         });
 
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let res = read_rpc(&mut stream).await;
+        let res = b.read_rpc().await;
         assert!(res.is_err());
-        client.await.unwrap();
     }
 
     #[tokio::test]
     async fn read_rpc_invalid_json() {
         use tokio::io::AsyncWriteExt;
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let client = tokio::spawn(async move {
-            let mut stream = TcpStream::connect(addr).await.unwrap();
-            stream.write_all(&5u32.to_be_bytes()).await.unwrap();
-            stream.write_all(b"hello").await.unwrap();
+        let (mut a, mut b) = MockTransport::pair();
+        tokio::spawn(async move {
+            a.inner.write_all(&5u32.to_be_bytes()).await.unwrap();
+            a.inner.write_all(b"hello").await.unwrap();
         });
 
-        let (mut stream, _) = listener.accept().await.unwrap();
-        assert!(read_rpc(&mut stream).await.is_err());
-        client.await.unwrap();
+        assert!(b.read_rpc().await.is_err());
     }
 
     #[test]
