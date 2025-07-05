@@ -928,6 +928,76 @@ mod tests {
         assert_eq!(Blockchain::subsidy_for_height(0, MAX_SUPPLY), 0);
     }
 
+    #[test]
+    fn subsidy_for_height_zero_after_many_halvings() {
+        // 64 halvings should zero out the reward
+        let height = HALVING_INTERVAL * 65;
+        assert_eq!(Blockchain::subsidy_for_height(height, 0), 0);
+    }
+
+    #[test]
+    fn decrypt_message_wrong_key_returns_none() {
+        let secp = secp256k1::Secp256k1::new();
+        let sk1 = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sk2 = secp256k1::SecretKey::from_slice(&[2u8; 32]).unwrap();
+        let pk2 = secp256k1::PublicKey::from_secret_key(&secp, &sk2);
+        let encrypted = encrypt_message("msg", &sk1, &pk2);
+        // use a completely unrelated key pair so shared secret differs
+        let wrong_sk = secp256k1::SecretKey::from_slice(&[3u8; 32]).unwrap();
+        let wrong_pk = secp256k1::PublicKey::from_secret_key(&secp, &wrong_sk);
+        match decrypt_message(&encrypted, &sk2, &wrong_pk) {
+            Some(text) => assert_ne!(text, "msg"),
+            None => {}
+        }
+    }
+
+    #[test]
+    fn prune_depth_greater_than_len_no_effect() {
+        let mut bc = Blockchain::new();
+        let tx = coinbase_transaction(A1, bc.block_subsidy()).unwrap();
+        bc.add_block(Block {
+            header: BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: compute_merkle_root(&[tx.clone()]),
+                timestamp: 0,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        });
+        let before = bc.all();
+        bc.prune(10);
+        assert_eq!(bc.all(), before);
+    }
+
+    #[test]
+    fn merkle_root_handles_odd_hash_count() {
+        let hashes = vec!["aa", "bb", "cc"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let root = merkle_root_from_hashes(&hashes);
+        // compute manual root by duplicating last hash
+        let mut layer: Vec<Vec<u8>> = hashes
+            .iter()
+            .map(|h| hex::decode(h).unwrap_or_default())
+            .collect();
+        while layer.len() > 1 {
+            let mut next = Vec::new();
+            for chunk in layer.chunks(2) {
+                let left = &chunk[0];
+                let right = if chunk.len() > 1 { &chunk[1] } else { left };
+                let mut hasher = Sha256::new();
+                hasher.update(left);
+                hasher.update(right);
+                next.push(hasher.finalize().to_vec());
+            }
+            layer = next;
+        }
+        let manual = hex::encode(&layer[0]);
+        assert_eq!(root, manual);
+    }
+
     // Strategy to generate random valid addresses using secret keys
     fn arb_address() -> impl Strategy<Value = String> {
         any::<[u8; 32]>()
