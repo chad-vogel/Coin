@@ -63,3 +63,63 @@ impl Block {
         self.transactions.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_rpc_roundtrip() {
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        let block = Block {
+            header: BlockHeader {
+                previous_hash: "prev".into(),
+                merkle_root: "root".into(),
+                timestamp: 42,
+                nonce: 7,
+                difficulty: 3,
+            },
+            transactions: vec![tx],
+        };
+        let rpc = block.to_rpc();
+        let recovered = Block::from_rpc(rpc).unwrap();
+        assert_eq!(block, recovered);
+    }
+
+    #[test]
+    fn prune_clears_transactions() {
+        let tx = Transaction {
+            sender: "a".into(),
+            recipient: "b".into(),
+            amount: 1,
+            fee: 0,
+            signature: Vec::new(),
+            encrypted_message: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        };
+        let mut block = Block {
+            header: BlockHeader {
+                previous_hash: "prev".into(),
+                merkle_root: "root".into(),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 0,
+            },
+            transactions: vec![tx],
+        };
+        let before = block.header.clone();
+        block.prune();
+        assert!(block.transactions.is_empty());
+        assert_eq!(block.header, before);
+    }
+}
