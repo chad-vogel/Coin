@@ -1,4 +1,4 @@
-use crate::rpc::{RpcMessage, read_rpc, write_rpc};
+use crate::rpc::{RpcMessage, RpcTransport};
 use clap::ValueEnum;
 use coin::meets_difficulty;
 use coin::{Block, BlockHeader, Blockchain, TransactionExt, compute_merkle_root};
@@ -35,12 +35,12 @@ const MAX_TIME_DRIFT_MS: i64 = 2 * 60 * 60 * 1000; // 2 hours
 
 /// Send a length-prefixed JSON-RPC message over the socket
 async fn write_msg(socket: &mut TcpStream, msg: &RpcMessage) -> tokio::io::Result<()> {
-    write_rpc(socket, msg).await
+    socket.write_rpc(msg).await
 }
 
 /// Read a length-prefixed JSON-RPC message from the socket
 async fn read_msg(socket: &mut TcpStream) -> tokio::io::Result<RpcMessage> {
-    read_rpc(socket).await
+    socket.read_rpc().await
 }
 
 async fn read_with_timeout(socket: &mut TcpStream) -> tokio::io::Result<bool> {

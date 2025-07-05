@@ -1,7 +1,7 @@
 use coin::{Block, BlockHeader, coinbase_transaction, compute_merkle_root};
 use coin_p2p::{
     Node, NodeType,
-    rpc::{RpcMessage, read_rpc, write_rpc},
+    rpc::{RpcMessage, RpcTransport},
     sign_handshake,
 };
 use coin_wallet::Wallet;
@@ -35,10 +35,8 @@ async fn handshake_peer(addr: SocketAddr) -> tokio::io::Result<TcpStream> {
                 public_key: pk.serialize().to_vec(),
                 signature: sign_handshake(&sk, "coin", 1),
             });
-            if write_rpc(&mut stream, &hs).await.is_ok() {
-                if let Ok(Ok(resp)) =
-                    timeout(Duration::from_millis(500), read_rpc(&mut stream)).await
-                {
+            if stream.write_rpc(&hs).await.is_ok() {
+                if let Ok(Ok(resp)) = timeout(Duration::from_millis(500), stream.read_rpc()).await {
                     if matches!(resp, RpcMessage::Handshake(_)) {
                         return Ok(stream);
                     }
@@ -232,7 +230,7 @@ async fn peer_limit_and_rate_limit() {
     assert_eq!(node.peers().await.len(), 2);
 
     for _ in 0..6 {
-        write_rpc(&mut peer1, &RpcMessage::Ping).await.unwrap();
+        peer1.write_rpc(&RpcMessage::Ping).await.unwrap();
     }
     sleep(Duration::from_millis(100)).await;
     assert!(!node.peers().await.contains(&peer1_addr));

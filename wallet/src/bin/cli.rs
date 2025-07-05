@@ -8,7 +8,7 @@ mod real_cli {
     use anyhow::{Result, anyhow};
     use clap::{Parser, Subcommand};
     use coin::{Blockchain, TransactionExt, new_transaction_with_fee};
-    use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
+    use coin_p2p::rpc::{RpcMessage, RpcTransport};
     use coin_proto::{
         Chain, GetChain, Handshake, Stake as RpcStake, Transaction, Unstake as RpcUnstake,
     };
@@ -158,11 +158,11 @@ mod real_cli {
     }
 
     async fn write_msg(stream: &mut TcpStream, msg: &RpcMessage) -> Result<()> {
-        write_rpc(stream, msg).await.map_err(Into::into)
+        stream.write_rpc(msg).await.map_err(Into::into)
     }
 
     async fn read_msg(stream: &mut TcpStream) -> Result<RpcMessage> {
-        read_rpc(stream).await.map_err(Into::into)
+        stream.read_rpc().await.map_err(Into::into)
     }
 
     async fn rpc_connect(addr: &str) -> Result<TcpStream> {

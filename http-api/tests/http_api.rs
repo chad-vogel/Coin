@@ -179,7 +179,7 @@ async fn test_rpc_error() {
 
 #[tokio::test]
 async fn test_forward_rpc_timeout() {
-    use coin_p2p::rpc::{RpcMessage, read_rpc, write_rpc};
+    use coin_p2p::rpc::{RpcMessage, RpcTransport};
     use coin_proto::Handshake;
     use tokio::net::TcpListener;
     use tokio::time::{Duration, sleep};
@@ -188,14 +188,14 @@ async fn test_forward_rpc_timeout() {
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-        let _ = read_rpc(&mut stream).await.unwrap();
+        let _ = stream.read_rpc().await.unwrap();
         let reply = RpcMessage::Handshake(Handshake {
             network_id: "coin".into(),
             version: 1,
             public_key: vec![],
             signature: vec![],
         });
-        write_rpc(&mut stream, &reply).await.unwrap();
+        stream.write_rpc(&reply).await.unwrap();
         sleep(Duration::from_secs(2)).await;
     });
 

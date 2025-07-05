@@ -1,12 +1,11 @@
-use coin_p2p::rpc::{RpcMessage, decode_message, encode_message, read_rpc, write_rpc};
+use coin_p2p::rpc::{RpcMessage, RpcTransport, decode_message, encode_message};
 use coin_proto::{
     Balance, Finalized, GetBalance, GetBlocks, GetTransaction, Schedule, Transaction,
     TransactionDetail, Vote,
 };
 use jsonrpc_lite::JsonRpc;
 use serde_json;
-use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncWriteExt, duplex};
 
 #[test]
 fn vote_and_schedule_roundtrip() {
@@ -77,33 +76,26 @@ fn vote_and_schedule_roundtrip() {
 
 #[tokio::test]
 async fn write_and_read_roundtrip() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let (mut a, mut b) = duplex(1024);
     let msg = RpcMessage::Ping;
     let server = tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let received = read_rpc(&mut stream).await.unwrap();
+        let received = b.read_rpc().await.unwrap();
         assert!(matches!(received, RpcMessage::Ping));
     });
-    let mut client = TcpStream::connect(addr).await.unwrap();
-    write_rpc(&mut client, &msg).await.unwrap();
+    a.write_rpc(&msg).await.unwrap();
     server.await.unwrap();
 }
 
 #[tokio::test]
 async fn read_rpc_rejects_large_message() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let client = tokio::spawn(async move {
-        let mut s = TcpStream::connect(addr).await.unwrap();
+    let (mut a, mut b) = duplex(1024);
+    tokio::spawn(async move {
         let len = ((1024 * 1024) + 1u32).to_be_bytes();
-        s.write_all(&len).await.unwrap();
-        s.write_all(&[0u8; 1]).await.unwrap();
+        a.write_all(&len).await.unwrap();
+        a.write_all(&[0u8; 1]).await.unwrap();
     });
-    let (mut stream, _) = listener.accept().await.unwrap();
-    let err = read_rpc(&mut stream).await.unwrap_err();
+    let err = b.read_rpc().await.unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-    client.await.unwrap();
 }
 
 #[test]
