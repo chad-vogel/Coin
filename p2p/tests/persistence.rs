@@ -1,5 +1,5 @@
 use coin::Blockchain;
-use coin_p2p::{Node, NodeType};
+use coin_p2p::{Node, NodeConfig, NodeType};
 use miner::mine_block;
 use tempfile::tempdir;
 
