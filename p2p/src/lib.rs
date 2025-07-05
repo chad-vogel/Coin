@@ -1557,16 +1557,11 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Miner,
-            Some(0),
-            Some(A1.to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                min_peers: Some(0),
+                wallet_address: Some(A1.to_string()),
+                ..Default::default()
+            },
         );
         let (_addrs, _rx) = miner.start().await.unwrap();
         sleep(Duration::from_millis(200)).await;
@@ -1579,16 +1574,11 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Miner,
-            Some(0),
-            Some(A1.to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                min_peers: Some(0),
+                wallet_address: Some(A1.to_string()),
+                ..Default::default()
+            },
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         {
