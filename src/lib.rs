@@ -41,7 +41,12 @@ pub fn merkle_root_from_hashes(hashes: &[String]) -> String {
         }
         layer = next;
     }
-    hex::encode(&layer[0])
+    let root_bytes = &layer[0];
+    if root_bytes.is_empty() {
+        hex::encode(Sha256::digest(&[]))
+    } else {
+        hex::encode(root_bytes)
+    }
 }
 
 /// Compute the Merkle root for a slice of transactions.
@@ -742,6 +747,24 @@ mod tests {
         assert_eq!(tx.outputs[0].address, A2);
         assert_eq!(tx.outputs[0].amount, 3);
         assert_eq!(tx.fee, 1);
+    }
+
+    #[test]
+    fn multi_output_transaction_invalid_address() {
+        // Use a valid sender address but invalid output address to exercise the
+        // error path in new_multi_transaction_with_fee.
+        let sk = secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
+        let sender = address_from_secret(&sk);
+        let result = new_multi_transaction_with_fee(&sender, vec![("badaddr".to_string(), 2)], 1);
+        assert!(matches!(result, Err(Error::InvalidAddress)));
+    }
+
+    #[test]
+    fn merkle_root_invalid_hex_treated_as_empty() {
+        let root = merkle_root_from_hashes(&["zz".to_string()]);
+        // Invalid hex strings are treated as empty byte slices, so the root
+        // should equal the hash of an empty slice.
+        assert_eq!(root, hex::encode(sha2::Sha256::digest(&[])));
     }
 
     #[test]
