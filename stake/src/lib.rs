@@ -10,6 +10,13 @@ pub const BOND_DELAY: u64 = 1;
 /// Number of rounds before a removed stake unlocks.
 pub const UNBOND_DELAY: u64 = 1;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StakeError {
+    InvalidAddress,
+    InsufficientBalance,
+    LockFailed,
+}
+
 #[derive(Clone, Debug)]
 pub struct StakeRegistry {
     active: HashMap<String, u64>,
@@ -32,16 +39,24 @@ impl StakeRegistry {
         self.active.values().sum()
     }
 
-    pub fn stake(&mut self, chain: &mut Blockchain, addr: &str, amount: u64) -> bool {
-        if !valid_address(addr) || chain.balance(addr) < amount as i64 {
-            return false;
+    pub fn stake(
+        &mut self,
+        chain: &mut Blockchain,
+        addr: &str,
+        amount: u64,
+    ) -> Result<(), StakeError> {
+        if !valid_address(addr) {
+            return Err(StakeError::InvalidAddress);
+        }
+        if chain.balance(addr) < amount as i64 {
+            return Err(StakeError::InsufficientBalance);
         }
         if !chain.lock_stake(addr, amount) {
-            return false;
+            return Err(StakeError::LockFailed);
         }
         let activate = self.round + BOND_DELAY;
         self.bonding.insert(addr.to_string(), (amount, activate));
-        true
+        Ok(())
     }
 
     pub fn unstake(&mut self, _chain: &mut Blockchain, addr: &str) -> u64 {
@@ -316,8 +331,8 @@ mod tests {
             ],
         });
         let mut reg = StakeRegistry::new();
-        assert!(reg.stake(&mut bc, &addr1, 30));
-        assert!(reg.stake(&mut bc, &addr2, 20));
+        assert!(reg.stake(&mut bc, &addr1, 30).is_ok());
+        assert!(reg.stake(&mut bc, &addr2, 20).is_ok());
         reg.advance_round(&mut bc);
         let total = reg.total_stake();
         assert_eq!(total, 50);
@@ -348,7 +363,7 @@ mod tests {
             transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
         let mut reg = StakeRegistry::new();
-        assert!(reg.stake(&mut bc, &addr, 10));
+        assert!(reg.stake(&mut bc, &addr, 10).is_ok());
         // not active until next round
         assert_eq!(reg.total_stake(), 0);
         reg.advance_round(&mut bc);
@@ -420,8 +435,8 @@ mod tests {
             ],
         });
         let mut reg = StakeRegistry::new();
-        assert!(reg.stake(&mut bc, &addr1, 2));
-        assert!(reg.stake(&mut bc, &addr2, 1));
+        assert!(reg.stake(&mut bc, &addr1, 2).is_ok());
+        assert!(reg.stake(&mut bc, &addr2, 1).is_ok());
         reg.advance_round(&mut bc);
         assert_eq!(reg.schedule(0).as_deref(), Some(addr1.as_str()));
         assert_eq!(reg.schedule(2).as_deref(), Some(addr2.as_str()));
@@ -463,7 +478,7 @@ mod tests {
             transactions: vec![coin::coinbase_transaction(&addr, bc.block_subsidy()).unwrap()],
         });
         let mut reg = StakeRegistry::new();
-        assert!(reg.stake(&mut bc, &addr, 10));
+        assert!(reg.stake(&mut bc, &addr, 10).is_ok());
         reg.advance_round(&mut bc);
         let mut cs = ConsensusState::new(reg);
         cs.start_round("h".into(), &mut bc);
@@ -480,9 +495,9 @@ mod tests {
     fn stake_rejects_invalid_inputs() {
         let mut reg = StakeRegistry::new();
         let mut bc = Blockchain::new();
-        assert!(!reg.stake(&mut bc, "bad", 10));
+        assert!(matches!(reg.stake(&mut bc, "bad", 10), Err(_)));
         let sk = SecretKey::from_slice(&[1u8; 32]).unwrap();
         let addr = address_from_secret(&sk);
-        assert!(!reg.stake(&mut bc, &addr, 10));
+        assert!(matches!(reg.stake(&mut bc, &addr, 10), Err(_)));
     }
 }
