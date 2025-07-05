@@ -1,5 +1,5 @@
 use coin::{Block, BlockHeader, Blockchain, coinbase_transaction, compute_merkle_root};
-use coin_p2p::{Node, NodeType};
+use coin_p2p::{Node, NodeConfig, NodeType};
 use coin_wallet::Wallet;
 use hex_literal::hex;
 use stake::Vote;
@@ -23,16 +23,10 @@ async fn finalize_block_on_votes() {
         vec!["0.0.0.0:0".parse().unwrap()],
         Duration::from_millis(50),
         NodeType::Verifier,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(dir.path().to_str().unwrap().to_string()),
+        NodeConfig {
+            block_dir: Some(dir.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        },
     );
     {
         let chain_handle = node.chain_handle();

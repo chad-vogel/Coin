@@ -1,6 +1,6 @@
 use coin::{Block, BlockHeader, coinbase_transaction, compute_merkle_root};
 use coin_p2p::{
-    Node, NodeType,
+    Node, NodeConfig, NodeType,
     rpc::{RpcMessage, RpcTransport},
     sign_handshake,
 };
@@ -58,16 +58,11 @@ async fn network_votes_finalize_block() {
             vec!["127.0.0.1:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(10),
-            Some(8),
-            None,
-            None,
+            NodeConfig {
+                max_msgs_per_sec: Some(10),
+                max_peers: Some(8),
+                ..Default::default()
+            },
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -77,16 +72,11 @@ async fn network_votes_finalize_block() {
             vec!["127.0.0.1:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(10),
-            Some(8),
-            None,
-            None,
+            NodeConfig {
+                max_msgs_per_sec: Some(10),
+                max_peers: Some(8),
+                ..Default::default()
+            },
         );
         let (_addrs_b, _) = node_b.start().await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -96,16 +86,11 @@ async fn network_votes_finalize_block() {
             vec!["127.0.0.1:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(10),
-            Some(8),
-            None,
-            None,
+            NodeConfig {
+                max_msgs_per_sec: Some(10),
+                max_peers: Some(8),
+                ..Default::default()
+            },
         );
         let (_addrs_c, _) = node_c.start().await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -192,16 +177,11 @@ async fn peer_limit_and_rate_limit() {
     let node = Node::new(
         vec!["127.0.0.1:0".parse().unwrap()],
         NodeType::Verifier,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        Some(5),
-        Some(2),
-        None,
-        None,
+        NodeConfig {
+            max_msgs_per_sec: Some(5),
+            max_peers: Some(2),
+            ..Default::default()
+        },
     );
     let (addrs, _) = node.start().await.unwrap();
     sleep(Duration::from_millis(50)).await;

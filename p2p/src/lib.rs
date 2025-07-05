@@ -234,6 +234,21 @@ async fn broadcast_block_internal(
     }
 }
 
+/// Configuration options when constructing a [`Node`].
+#[derive(Clone, Default)]
+pub struct NodeConfig {
+    pub min_peers: Option<usize>,
+    pub wallet_address: Option<String>,
+    pub peers_file: Option<String>,
+    pub tor_proxy: Option<SocketAddr>,
+    pub network_id: Option<String>,
+    pub protocol_version: Option<u32>,
+    pub max_msgs_per_sec: Option<u32>,
+    pub max_peers: Option<usize>,
+    pub mining_threads: Option<usize>,
+    pub block_dir: Option<String>,
+}
+
 /// Simple P2P node maintaining a peer address list and pinging peers
 #[derive(Clone)]
 pub struct Node {
@@ -262,51 +277,8 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new(
-        listeners: Vec<SocketAddr>,
-        node_type: NodeType,
-        min_peers: Option<usize>,
-        wallet_address: Option<String>,
-        peers_file: Option<String>,
-        tor_proxy: Option<SocketAddr>,
-        network_id: Option<String>,
-        protocol_version: Option<u32>,
-        max_msgs_per_sec: Option<u32>,
-        max_peers: Option<usize>,
-        mining_threads: Option<usize>,
-        block_dir: Option<String>,
-    ) -> Self {
-        let (node_key, node_pub) = load_or_create_key("node.key");
-        let stake = Arc::new(Mutex::new(StakeRegistry::new()));
-        let consensus = Arc::new(Mutex::new(ConsensusState::new(StakeRegistry::new())));
-        Self {
-            listeners,
-            peers: Arc::new(Mutex::new(HashSet::new())),
-            msg_times: Arc::new(Mutex::new(HashMap::new())),
-            ping_interval: Duration::from_secs(5),
-            node_type,
-            chain: Arc::new(Mutex::new(Blockchain::new())),
-            stake,
-            consensus,
-            min_peers: min_peers.unwrap_or(1),
-            wallet_address,
-            peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
-            tor_proxy,
-            network_id: network_id.unwrap_or_else(|| "coin".to_string()),
-            protocol_version: protocol_version.unwrap_or(1),
-            max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
-            max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
-            mining_threads: mining_threads.unwrap_or_else(|| {
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(1)
-            }),
-            node_key,
-            node_pub,
-            key_file: "node.key".to_string(),
-            block_dir: block_dir.unwrap_or_else(|| "blocks".to_string()),
-            running: Arc::new(AtomicBool::new(true)),
-        }
+    pub fn new(listeners: Vec<SocketAddr>, node_type: NodeType, config: NodeConfig) -> Self {
+        Self::with_interval(listeners, Duration::from_secs(5), node_type, config)
     }
 
     pub fn chain_handle(&self) -> Arc<Mutex<Blockchain>> {
@@ -326,16 +298,16 @@ impl Node {
         listeners: Vec<SocketAddr>,
         interval: Duration,
         node_type: NodeType,
-        min_peers: Option<usize>,
-        wallet_address: Option<String>,
-        peers_file: Option<String>,
-        tor_proxy: Option<SocketAddr>,
-        network_id: Option<String>,
-        protocol_version: Option<u32>,
-        max_msgs_per_sec: Option<u32>,
-        max_peers: Option<usize>,
-        mining_threads: Option<usize>,
-        block_dir: Option<String>,
+        config: NodeConfig,
+    ) -> Self {
+        Self::create(listeners, interval, node_type, config)
+    }
+
+    fn create(
+        listeners: Vec<SocketAddr>,
+        interval: Duration,
+        node_type: NodeType,
+        config: NodeConfig,
     ) -> Self {
         let (node_key, node_pub) = load_or_create_key("node.key");
         let stake = Arc::new(Mutex::new(StakeRegistry::new()));
@@ -349,15 +321,15 @@ impl Node {
             chain: Arc::new(Mutex::new(Blockchain::new())),
             stake,
             consensus,
-            min_peers: min_peers.unwrap_or(1),
-            wallet_address,
-            peers_file: peers_file.unwrap_or_else(|| "peers.bin".to_string()),
-            tor_proxy,
-            network_id: network_id.unwrap_or_else(|| "coin".to_string()),
-            protocol_version: protocol_version.unwrap_or(1),
-            max_msgs_per_sec: max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
-            max_peers: max_peers.unwrap_or(DEFAULT_MAX_PEERS),
-            mining_threads: mining_threads.unwrap_or_else(|| {
+            min_peers: config.min_peers.unwrap_or(1),
+            wallet_address: config.wallet_address,
+            peers_file: config.peers_file.unwrap_or_else(|| "peers.bin".to_string()),
+            tor_proxy: config.tor_proxy,
+            network_id: config.network_id.unwrap_or_else(|| "coin".to_string()),
+            protocol_version: config.protocol_version.unwrap_or(1),
+            max_msgs_per_sec: config.max_msgs_per_sec.unwrap_or(DEFAULT_MAX_MSGS_PER_SEC),
+            max_peers: config.max_peers.unwrap_or(DEFAULT_MAX_PEERS),
+            mining_threads: config.mining_threads.unwrap_or_else(|| {
                 std::thread::available_parallelism()
                     .map(|n| n.get())
                     .unwrap_or(1)
@@ -365,7 +337,7 @@ impl Node {
             node_key,
             node_pub,
             key_file: "node.key".to_string(),
-            block_dir: block_dir.unwrap_or_else(|| "blocks".to_string()),
+            block_dir: config.block_dir.unwrap_or_else(|| "blocks".to_string()),
             running: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -1086,16 +1058,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         assert_eq!(node.node_type(), NodeType::Wallet);
         let (addrs, mut rx) = node.start().await.unwrap();
@@ -1142,16 +1105,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1189,16 +1143,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let unreachable: SocketAddr = "127.0.0.1:9".parse().unwrap();
@@ -1213,16 +1158,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1244,16 +1180,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         {
             let mut chain = node_b.chain.lock().await;
@@ -1297,16 +1224,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1337,16 +1255,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -1362,16 +1271,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1421,16 +1321,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _rx) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1483,16 +1374,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_a, _) = node_a.start().await.unwrap();
         let addr_a = addrs_a[0];
@@ -1501,16 +1383,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -1754,16 +1627,11 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Miner,
-            Some(1),
-            Some(A1.to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                min_peers: Some(1),
+                wallet_address: Some(A1.to_string()),
+                ..Default::default()
+            },
         );
         let (_m_addrs, _rx) = miner.start().await.unwrap();
         {
@@ -1800,16 +1668,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = peer.start().await.unwrap();
         miner.connect(addrs[0]).await.unwrap();
@@ -1825,16 +1684,10 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
-            None,
-            None,
-            Some(file.clone()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                peers_file: Some(file.clone()),
+                ..Default::default()
+            },
         );
         let (_addrs, _rx) = node.start().await.unwrap();
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
@@ -1845,16 +1698,10 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Wallet,
-            None,
-            None,
-            Some(file.clone()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                peers_file: Some(file.clone()),
+                ..Default::default()
+            },
         );
         let (_a2, _r2) = node2.start().await.unwrap();
         assert!(node2.peers().await.contains(&peer));
@@ -1865,32 +1712,22 @@ mod tests {
         let node_a = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            Some("net1".into()),
-            Some(1),
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                network_id: Some("net1".into()),
+                protocol_version: Some(1),
+                ..Default::default()
+            },
         );
         let (addrs, _) = node_a.start().await.unwrap();
         let addr = addrs[0];
         let node_b = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            Some("net2".into()),
-            Some(1),
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                network_id: Some("net2".into()),
+                protocol_version: Some(1),
+                ..Default::default()
+            },
         );
         assert!(node_b.connect(addr).await.is_err());
         assert!(node_b.peers().await.is_empty());
@@ -1898,16 +1735,11 @@ mod tests {
         let node_c = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            Some("net1".into()),
-            Some(2),
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                network_id: Some("net1".into()),
+                protocol_version: Some(2),
+                ..Default::default()
+            },
         );
         assert!(node_c.connect(addr).await.is_err());
         assert!(node_c.peers().await.is_empty());
@@ -1918,16 +1750,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1954,16 +1777,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -1991,16 +1805,10 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(50),
             NodeType::Verifier,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(5),
-            None,
-            None,
-            None,
+            NodeConfig {
+                max_msgs_per_sec: Some(5),
+                ..Default::default()
+            },
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2036,16 +1844,10 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(1),
-            None,
-            None,
-            None,
+            NodeConfig {
+                max_msgs_per_sec: Some(1),
+                ..Default::default()
+            },
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2088,16 +1890,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2148,16 +1941,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2202,16 +1986,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2242,31 +2017,16 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            Some("127.0.0.1:1".parse().unwrap()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig {
+                tor_proxy: Some("127.0.0.1:1".parse().unwrap()),
+                ..Default::default()
+            },
         );
         let node_b = Node::with_interval(
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -2280,31 +2040,13 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let node_b = Node::with_interval(
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs_b, _) = node_b.start().await.unwrap();
         let addr_b = addrs_b[0];
@@ -2326,16 +2068,7 @@ mod tests {
             vec!["0.0.0.0:0".parse().unwrap()],
             Duration::from_millis(10),
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (_addrs, _) = node.start().await.unwrap();
         assert_eq!(node.chain.lock().await.mempool_len(), 1);
@@ -2349,16 +2082,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2405,16 +2129,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
@@ -2463,16 +2178,7 @@ mod tests {
         let node = Node::new(
             vec!["0.0.0.0:0".parse().unwrap()],
             NodeType::Wallet,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            NodeConfig::default(),
         );
         let (addrs, _) = node.start().await.unwrap();
         let addr = addrs[0];
