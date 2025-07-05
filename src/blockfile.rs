@@ -2,7 +2,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use rocksdb::{DB, Env, Options};
+use rocksdb::{DB, Options};
 
 use bincode;
 
@@ -152,6 +152,16 @@ mod tests {
     use crate::{Blockchain, coinbase_transaction};
     use tempfile::tempdir;
 
+    fn write_legacy_block(dir: &std::path::Path, index: u32, block: &Block) {
+        let data = bincode::serialize(block).unwrap();
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&MAGIC_BYTES);
+        buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&data);
+        let path = dir.join(format!("blk{:05}.dat", index));
+        std::fs::write(path, buf).unwrap();
+    }
+
     #[test]
     fn append_and_read_blocks_roundtrip() {
         let dir = tempdir().unwrap();
@@ -196,6 +206,54 @@ mod tests {
         append_block(dir.path(), &block).unwrap();
         let blocks = read_blocks(dir.path()).unwrap();
         assert_eq!(blocks.len(), 2);
+    }
+
+    #[test]
+    fn migrate_from_legacy_files() {
+        let dir = tempdir().unwrap();
+        let mut bc = Blockchain::new();
+        let tx =
+            coinbase_transaction("1BvgsfsZQVtkLS69NvGF8rw6NZW2ShJQHr", bc.block_subsidy()).unwrap();
+        bc.add_block(Block {
+            header: crate::BlockHeader {
+                previous_hash: String::new(),
+                merkle_root: crate::compute_merkle_root(&[tx.clone()]),
+                timestamp: 1,
+                nonce: 0,
+                difficulty: 1,
+            },
+            transactions: vec![tx.clone()],
+        });
+        for (i, block) in bc.all().iter().enumerate() {
+            write_legacy_block(dir.path(), i as u32, block);
+        }
+        let blocks = migrate_from_files(dir.path()).unwrap();
+        assert_eq!(blocks, bc.all());
+        // ensure RocksDB can read them via read_blocks
+        let loaded = read_blocks(dir.path()).unwrap();
+        assert_eq!(loaded, bc.all());
+    }
+
+    #[test]
+    fn migrate_from_files_bad_magic() {
+        let dir = tempdir().unwrap();
+        // write invalid magic bytes
+        std::fs::write(dir.path().join("blk00000.dat"), b"BADMAGIC").unwrap();
+        let res = migrate_from_files(dir.path());
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn migrate_from_files_length_mismatch() {
+        let dir = tempdir().unwrap();
+        // correct magic but wrong length
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&MAGIC_BYTES);
+        buf.extend_from_slice(&10u32.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 5]); // length less than declared
+        std::fs::write(dir.path().join("blk00000.dat"), buf).unwrap();
+        let res = migrate_from_files(dir.path());
+        assert!(res.is_err());
     }
 
     #[test]
