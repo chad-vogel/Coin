@@ -41,7 +41,12 @@ pub fn merkle_root_from_hashes(hashes: &[String]) -> String {
         }
         layer = next;
     }
-    hex::encode(&layer[0])
+    let root_bytes = &layer[0];
+    if root_bytes.is_empty() {
+        hex::encode(Sha256::digest(&[]))
+    } else {
+        hex::encode(root_bytes)
+    }
 }
 
 /// Compute the Merkle root for a slice of transactions.
